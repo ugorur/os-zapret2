@@ -9,6 +9,7 @@ PIDFILE="/var/run/dvtws2.pid"
 DVTWS_BIN="${ZAPRET_DIR}/binaries/my/dvtws2"
 HOSTLIST="${ZAPRET_DIR}/hostlist.txt"
 AUTOHOSTLIST="${ZAPRET_DIR}/autohostlist.txt"
+LUA_LIB="${ZAPRET_DIR}/lua/zapret-lib.lua"
 LUA_ANTIDPI="${ZAPRET_DIR}/lua/zapret-antidpi.lua"
 
 # ipfw rule numbers reserved for zapret (use high range to avoid conflicts)
@@ -78,19 +79,21 @@ start_service() {
     # Build dvtws2 arguments
     local args="--port=${DIVERT_PORT}"
 
-    # Load Lua antidpi library
+    # Load Lua libraries (lib must come before antidpi)
+    if [ -f "${LUA_LIB}" ]; then
+        args="${args} --lua-init=@${LUA_LIB}"
+    fi
     if [ -f "${LUA_ANTIDPI}" ]; then
         args="${args} --lua-init=@${LUA_ANTIDPI}"
     fi
 
-    # Add HTTP strategy profile
+    # Add strategy arguments directly
+    # Users paste the full dvtws2 args from blockcheck2 results
     if [ -n "${HTTP_ARGS}" ]; then
-        args="${args} --new --filter-tcp=80 --filter-l7=http ${HTTP_ARGS}"
+        args="${args} ${HTTP_ARGS}"
     fi
-
-    # Add HTTPS strategy profile
     if [ -n "${HTTPS_ARGS}" ]; then
-        args="${args} --new --filter-tcp=443 --filter-l7=tls ${HTTPS_ARGS}"
+        args="${args} ${HTTPS_ARGS}"
     fi
 
     # Add hostlist if configured
@@ -108,7 +111,8 @@ start_service() {
 
     # IMPORTANT: Start dvtws2 BEFORE adding ipfw rules
     # If dvtws2 is not listening on the divert port, diverted packets are dropped
-    ${DVTWS_BIN} ${args} --daemon --pidfile=${PIDFILE}
+    # --sockarg marks reinjected packets so ipfw "not sockarg" skips them
+    ${DVTWS_BIN} ${args} --sockarg=0x200 --daemon --pidfile=${PIDFILE}
 
     # Verify dvtws2 started successfully
     sleep 1
@@ -117,12 +121,24 @@ start_service() {
         exit 1
     fi
 
-    # Now add ipfw divert rules (dvtws2 is already listening)
-    ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
-    ipfw -q add ${RULE_BASE} divert ${DIVERT_PORT} tcp from any to any ${PORTS} out xmit ${wan_dev}
-    ipfw -q add ${RULE_BASE}1 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags syn,ack in recv ${wan_dev}
-    ipfw -q add ${RULE_BASE}2 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags fin in recv ${wan_dev}
-    ipfw -q add ${RULE_BASE}3 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags rst in recv ${wan_dev}
+    # Delete old rules first
+    local r=${RULE_BASE}
+    while [ ${r} -le $((RULE_BASE + 10)) ]; do
+        ipfw -q delete ${r} 2>/dev/null
+        r=$((r + 1))
+    done
+
+    # Outbound-only divert rules — one per port
+    # "not sockarg" prevents re-diverting packets already processed by dvtws2
+    # dvtws2 marks reinjected packets with sockarg so they skip the divert rule
+    local rulenum=${RULE_BASE}
+    local IFS_OLD="${IFS}"
+    IFS=","
+    for port in ${PORTS}; do
+        ipfw -qf add ${rulenum} divert ${DIVERT_PORT} tcp from any to any ${port} out not sockarg xmit ${wan_dev}
+        rulenum=$((rulenum + 1))
+    done
+    IFS="${IFS_OLD}"
 
     echo '{"status": "started", "pid": "'$(cat ${PIDFILE})'", "interface": "'${wan_dev}'"}'
 }
@@ -130,7 +146,12 @@ start_service() {
 stop_service() {
     # IMPORTANT: Remove ipfw rules BEFORE stopping dvtws2
     # This prevents packets from being diverted to a dead socket
-    ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
+        # Delete rule range 19000-19010
+    local r=${RULE_BASE}
+    while [ ${r} -le $((RULE_BASE + 10)) ]; do
+        ipfw -q delete ${r} 2>/dev/null
+        r=$((r + 1))
+    done
 
     # Stop dvtws2
     if [ -f "${PIDFILE}" ]; then
