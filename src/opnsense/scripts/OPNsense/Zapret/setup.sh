@@ -33,15 +33,15 @@ make clean 2>/dev/null || true
 make
 
 # Verify binaries
-if [ -x "${ZAPRET_DIR}/nfq/dvtws2" ]; then
-    echo "dvtws2 compiled successfully: ${ZAPRET_DIR}/nfq/dvtws2"
+if [ -x "${ZAPRET_DIR}/binaries/my/dvtws2" ]; then
+    echo "dvtws2 compiled successfully: ${ZAPRET_DIR}/binaries/my/dvtws2"
 else
     echo "ERROR: dvtws2 compilation failed!" >&2
     exit 1
 fi
 
-if [ -x "${ZAPRET_DIR}/nfq/tpws2" ]; then
-    echo "tpws2 compiled successfully: ${ZAPRET_DIR}/nfq/tpws2"
+if [ -x "${ZAPRET_DIR}/binaries/my/tpws2" ]; then
+    echo "tpws2 compiled successfully: ${ZAPRET_DIR}/binaries/my/tpws2"
 fi
 
 # Ensure config directory exists

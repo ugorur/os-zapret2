@@ -1,7 +1,7 @@
 <model>
     <mount>//OPNsense/Zapret</mount>
     <description>Zapret2 DPI Bypass Configuration</description>
-    <version>1.0.0</version>
+    <version>2.0.0</version>
     <items>
         <general>
             <enabled type="BooleanField">
@@ -20,71 +20,30 @@
                 <Required>Y</Required>
                 <ValidationMessage>Please enter a valid port number.</ValidationMessage>
             </divertport>
-            <mode type="OptionField">
-                <Default>dvtws</Default>
-                <OptionValues>
-                    <dvtws>dvtws2 (divert socket)</dvtws>
-                    <tpws>tpws2 (transparent proxy)</tpws>
-                </OptionValues>
-                <Required>Y</Required>
-            </mode>
-        </general>
-        <dpi>
-            <desyncmode type="OptionField">
-                <Default>fake</Default>
-                <OptionValues>
-                    <fake>fake</fake>
-                    <multisplit>multisplit</multisplit>
-                    <fakedsplit>fakedsplit</fakedsplit>
-                    <fakeddisorder>fakeddisorder</fakeddisorder>
-                    <syndata>syndata</syndata>
-                    <hopbyhop>hopbyhop</hopbyhop>
-                    <destopt>destopt</destopt>
-                    <ipfrag1>ipfrag1</ipfrag1>
-                </OptionValues>
-                <Required>Y</Required>
-            </desyncmode>
-            <desyncttl type="IntegerField">
-                <Default>6</Default>
-                <MinimumValue>1</MinimumValue>
-                <MaximumValue>128</MaximumValue>
-                <Required>Y</Required>
-                <ValidationMessage>TTL must be between 1 and 128.</ValidationMessage>
-            </desyncttl>
-            <splitpos type="IntegerField">
-                <Default>2</Default>
-                <MinimumValue>1</MinimumValue>
-                <MaximumValue>65535</MaximumValue>
-                <Required>N</Required>
-            </splitpos>
-            <desyncfooling type="OptionField">
-                <Default>none</Default>
-                <OptionValues>
-                    <none>None</none>
-                    <badsum>badsum</badsum>
-                    <badseq>badseq</badseq>
-                    <md5sig>md5sig</md5sig>
-                    <datanoack>datanoack</datanoack>
-                </OptionValues>
-                <Required>N</Required>
-            </desyncfooling>
             <ports type="CSVListField">
                 <Default>80,443</Default>
                 <Required>Y</Required>
                 <ValidationMessage>Please enter comma-separated port numbers.</ValidationMessage>
             </ports>
-            <customargs type="TextField">
+        </general>
+        <strategy>
+            <httpargs type="TextField">
                 <Required>N</Required>
-                <Mask>/^[a-zA-Z0-9\s\-\=\.\/\_\,\:\@]*$/</Mask>
-                <ValidationMessage>Only alphanumeric characters, spaces, hyphens, equals, dots, slashes, underscores, commas, colons, and @ are allowed.</ValidationMessage>
-            </customargs>
-        </dpi>
+            </httpargs>
+            <httpsargs type="TextField">
+                <Required>N</Required>
+            </httpsargs>
+            <extraargs type="TextField">
+                <Required>N</Required>
+            </extraargs>
+        </strategy>
         <hostlist>
             <mode type="OptionField">
                 <Default>all</Default>
                 <OptionValues>
                     <all>All traffic on configured ports</all>
                     <list>Only listed domains</list>
+                    <auto>Auto-detect blocked domains</auto>
                 </OptionValues>
                 <Required>Y</Required>
             </mode>

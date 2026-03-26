@@ -16,10 +16,10 @@
         <help>Select the WAN interface where DPI bypass should be applied.</help>
     </field>
     <field>
-        <id>general.mode</id>
-        <label>Mode</label>
-        <type>dropdown</type>
-        <help>dvtws2 uses divert sockets (recommended). tpws2 uses transparent proxy.</help>
+        <id>general.ports</id>
+        <label>Ports</label>
+        <type>text</type>
+        <help>Comma-separated list of ports to intercept (default: 80,443).</help>
     </field>
     <field>
         <id>general.divertport</id>
@@ -30,52 +30,37 @@
     </field>
     <field>
         <type>header</type>
-        <label>DPI Desynchronization</label>
+        <label>DPI Bypass Strategy</label>
     </field>
     <field>
-        <id>dpi.desyncmode</id>
-        <label>Desync Mode</label>
-        <type>dropdown</type>
-        <help><![CDATA[DPI evasion strategy. Use <b>Diagnostics > Blockcheck</b> to find the best mode for your ISP.<br/>
-            <b>fake</b> — send fake TLS ClientHello with low TTL (most common)<br/>
-            <b>multisplit</b> — split TLS ClientHello across TCP segments<br/>
-            <b>fakedsplit</b> — combine fake + split<br/>
-            <b>fakeddisorder</b> — fake + out-of-order segments<br/>
-            <b>syndata</b> — add data to SYN packet<br/>
-            <b>hopbyhop</b> — add hop-by-hop IPv6 header<br/>
-            <b>destopt</b> — add destination options header<br/>
-            <b>ipfrag1</b> — IP fragmentation]]></help>
+        <type>info</type>
+        <label>How to find your strategy</label>
+        <text><![CDATA[Run <b>blockcheck2</b> from the <a href="/ui/zapret/diagnostics">Diagnostics</a> page or via SSH:<br/>
+            <code>cd /usr/local/etc/zapret2 && env IFACE_WAN=your_wan_if /bin/sh blockcheck2.sh</code><br/><br/>
+            Copy the working strategy from the SUMMARY output into the fields below.<br/>
+            HTTP strategies go in the HTTP field, HTTPS/TLS strategies go in the HTTPS field.]]></text>
     </field>
     <field>
-        <id>dpi.desyncttl</id>
-        <label>Desync TTL</label>
+        <id>strategy.httpargs</id>
+        <label>HTTP Strategy</label>
         <type>text</type>
-        <help>Time-to-live for fake packets. Must be high enough to reach the DPI device but low enough to expire before reaching the server. Typical values: 4-8. Use blockcheck to determine optimal value.</help>
+        <help><![CDATA[dvtws2 arguments for HTTP (port 80) bypass from blockcheck2 results.<br/>
+            Paste the part after <code>dvtws2</code> from a <code>curl_test_http</code> line in the SUMMARY.<br/>
+            Example: <code>--payload=http_req --lua-desync=http_hostcase:spell=hoSt</code>]]></help>
     </field>
     <field>
-        <id>dpi.desyncfooling</id>
-        <label>Desync Fooling</label>
-        <type>dropdown</type>
-        <help>Additional method to make fake packets rejected by the server but accepted by DPI. badsum = bad TCP checksum, badseq = bad sequence number, md5sig = TCP MD5 signature.</help>
-    </field>
-    <field>
-        <id>dpi.splitpos</id>
-        <label>Split Position</label>
+        <id>strategy.httpsargs</id>
+        <label>HTTPS Strategy</label>
         <type>text</type>
-        <help>Byte position at which to split TLS ClientHello. Relevant for multisplit, fakedsplit, and fakeddisorder modes.</help>
-        <advanced>true</advanced>
+        <help><![CDATA[dvtws2 arguments for HTTPS/TLS (port 443) bypass from blockcheck2 results.<br/>
+            Paste the part after <code>dvtws2</code> from a <code>curl_test_https_tls12</code> line in the SUMMARY.<br/>
+            Example: <code>--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-4,3-20:repeats=1</code>]]></help>
     </field>
     <field>
-        <id>dpi.ports</id>
-        <label>Ports</label>
+        <id>strategy.extraargs</id>
+        <label>Extra Arguments</label>
         <type>text</type>
-        <help>Comma-separated list of ports to intercept (default: 80,443).</help>
-    </field>
-    <field>
-        <id>dpi.customargs</id>
-        <label>Custom Arguments</label>
-        <type>text</type>
-        <help>Additional command-line arguments passed directly to dvtws2/tpws2. Use for advanced configurations not covered by the fields above.</help>
+        <help>Additional global dvtws2 arguments appended to the command line.</help>
         <advanced>true</advanced>
     </field>
     <field>
@@ -87,7 +72,8 @@
         <label>Host List Mode</label>
         <type>dropdown</type>
         <help><![CDATA[<b>All traffic</b> — apply DPI bypass to all traffic on configured ports.<br/>
-            <b>Only listed domains</b> — apply only to domains listed below.]]></help>
+            <b>Only listed domains</b> — apply only to domains listed below.<br/>
+            <b>Auto-detect</b> — automatically detect and add blocked domains.]]></help>
     </field>
     <field>
         <id>hostlist.domains</id>

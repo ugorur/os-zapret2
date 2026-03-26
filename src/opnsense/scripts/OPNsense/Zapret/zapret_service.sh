@@ -6,11 +6,12 @@
 ZAPRET_DIR="/usr/local/etc/zapret2"
 CONFIG="${ZAPRET_DIR}/zapret.conf"
 PIDFILE="/var/run/dvtws2.pid"
-DVTWS_BIN="${ZAPRET_DIR}/nfq/dvtws2"
-TPWS_BIN="${ZAPRET_DIR}/nfq/tpws2"
+DVTWS_BIN="${ZAPRET_DIR}/binaries/my/dvtws2"
 HOSTLIST="${ZAPRET_DIR}/hostlist.txt"
+AUTOHOSTLIST="${ZAPRET_DIR}/autohostlist.txt"
+LUA_ANTIDPI="${ZAPRET_DIR}/lua/zapret-antidpi.lua"
 
-# ipfw rule numbers reserved for zapret
+# ipfw rule numbers reserved for zapret (use high range to avoid conflicts)
 RULE_BASE=19000
 
 load_config() {
@@ -22,8 +23,6 @@ load_config() {
 }
 
 resolve_interface() {
-    # OPNsense stores interface names like "opt1", "wan", etc.
-    # Resolve to the actual device name using ifconfig
     local iface="$1"
 
     # Try direct match first (e.g., pppoe2, igc0)
@@ -32,9 +31,9 @@ resolve_interface() {
         return
     fi
 
-    # Try OPNsense interface mapping via config.xml
-    local dev=$(grep -A3 "<if>${iface}</if>" /conf/config.xml 2>/dev/null | grep '<if>' | sed 's/.*<if>\(.*\)<\/if>.*/\1/' | head -1)
-    if [ -n "${dev}" ] && ifconfig "${dev}" > /dev/null 2>&1; then
+    # Try resolving OPNsense interface name via pluginctl
+    local dev=$(/usr/local/sbin/pluginctl -4 "${iface}" 2>/dev/null | head -1)
+    if [ -n "${dev}" ]; then
         echo "${dev}"
         return
     fi
@@ -70,7 +69,6 @@ start_service() {
     # Verify ipfw default-accept (safety check)
     local default_accept=$(sysctl -n net.inet.ip.fw.default_to_accept 2>/dev/null)
     if [ "${default_accept}" != "1" ]; then
-        # Add explicit allow-all rule as safety net
         ipfw -q add 65534 allow all from any to any
     fi
 
@@ -79,72 +77,67 @@ start_service() {
 
     # Build dvtws2 arguments
     local args="--port=${DIVERT_PORT}"
-    args="${args} --dpi-desync=${DESYNC_MODE}"
 
-    if [ -n "${DESYNC_TTL}" ] && [ "${DESYNC_TTL}" != "0" ]; then
-        args="${args} --dpi-desync-ttl=${DESYNC_TTL}"
+    # Load Lua antidpi library
+    if [ -f "${LUA_ANTIDPI}" ]; then
+        args="${args} --lua-init=@${LUA_ANTIDPI}"
     fi
 
-    if [ -n "${DESYNC_SPLIT_POS}" ] && [ "${DESYNC_SPLIT_POS}" != "0" ]; then
-        args="${args} --dpi-desync-split-pos=${DESYNC_SPLIT_POS}"
+    # Add HTTP strategy profile
+    if [ -n "${HTTP_ARGS}" ]; then
+        args="${args} --new --filter-tcp=80 --filter-l7=http ${HTTP_ARGS}"
     fi
 
-    if [ -n "${DESYNC_FOOLING}" ] && [ "${DESYNC_FOOLING}" != "none" ]; then
-        args="${args} --dpi-desync-fooling=${DESYNC_FOOLING}"
+    # Add HTTPS strategy profile
+    if [ -n "${HTTPS_ARGS}" ]; then
+        args="${args} --new --filter-tcp=443 --filter-l7=tls ${HTTPS_ARGS}"
     fi
-
-    # Add fake TLS payload if available and mode uses it
-    local fake_tls="${ZAPRET_DIR}/files/fake/tls_clienthello_www_google_com.bin"
-    case "${DESYNC_MODE}" in
-        fake|fakedsplit|fakeddisorder)
-            if [ -f "${fake_tls}" ]; then
-                args="${args} --dpi-desync-fake-tls=${fake_tls}"
-            fi
-            ;;
-    esac
 
     # Add hostlist if configured
     if [ "${HOSTLIST_MODE}" = "list" ] && [ -f "${HOSTLIST}" ] && [ -s "${HOSTLIST}" ]; then
         args="${args} --hostlist=${HOSTLIST}"
+    elif [ "${HOSTLIST_MODE}" = "auto" ]; then
+        touch "${AUTOHOSTLIST}" 2>/dev/null
+        args="${args} --hostlist-auto=${AUTOHOSTLIST}"
     fi
 
-    # Add custom arguments
-    if [ -n "${CUSTOM_ARGS}" ]; then
-        args="${args} ${CUSTOM_ARGS}"
+    # Add extra arguments
+    if [ -n "${EXTRA_ARGS}" ]; then
+        args="${args} ${EXTRA_ARGS}"
     fi
 
-    # Add ipfw divert rules
+    # IMPORTANT: Start dvtws2 BEFORE adding ipfw rules
+    # If dvtws2 is not listening on the divert port, diverted packets are dropped
+    ${DVTWS_BIN} ${args} --daemon --pidfile=${PIDFILE}
+
+    # Verify dvtws2 started successfully
+    sleep 1
+    if [ ! -f "${PIDFILE}" ] || ! kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
+        echo '{"status": "error", "message": "dvtws2 failed to start. Check strategy arguments."}'
+        exit 1
+    fi
+
+    # Now add ipfw divert rules (dvtws2 is already listening)
     ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
     ipfw -q add ${RULE_BASE} divert ${DIVERT_PORT} tcp from any to any ${PORTS} out xmit ${wan_dev}
     ipfw -q add ${RULE_BASE}1 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags syn,ack in recv ${wan_dev}
     ipfw -q add ${RULE_BASE}2 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags fin in recv ${wan_dev}
     ipfw -q add ${RULE_BASE}3 divert ${DIVERT_PORT} tcp from any ${PORTS} to any tcpflags rst in recv ${wan_dev}
 
-    # Start dvtws2 as daemon
-    ${DVTWS_BIN} ${args} --daemon --pidfile=${PIDFILE}
-
-    if [ -f "${PIDFILE}" ] && kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
-        echo '{"status": "started", "pid": "'$(cat ${PIDFILE})'", "interface": "'${wan_dev}'"}'
-    else
-        # Cleanup on failure
-        ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
-        echo '{"status": "error", "message": "dvtws2 failed to start. Check arguments."}'
-        exit 1
-    fi
+    echo '{"status": "started", "pid": "'$(cat ${PIDFILE})'", "interface": "'${wan_dev}'"}'
 }
 
 stop_service() {
+    # IMPORTANT: Remove ipfw rules BEFORE stopping dvtws2
+    # This prevents packets from being diverted to a dead socket
+    ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
+
     # Stop dvtws2
     if [ -f "${PIDFILE}" ]; then
         kill "$(cat ${PIDFILE})" 2>/dev/null
         rm -f "${PIDFILE}"
     fi
-
-    # Also try killall as fallback
     killall dvtws2 2>/dev/null
-
-    # Remove ipfw rules
-    ipfw -q delete ${RULE_BASE} ${RULE_BASE}1 ${RULE_BASE}2 ${RULE_BASE}3 2>/dev/null
 
     echo '{"status": "stopped"}'
 }
@@ -160,13 +153,13 @@ status_service() {
 }
 
 reconfigure_service() {
-    # Regenerate templates
     /usr/local/sbin/configctl template reload OPNsense/Zapret
 
     load_config
 
     if [ "${ZAPRET_ENABLED}" = "1" ]; then
         stop_service > /dev/null 2>&1
+        sleep 1
         start_service
     else
         stop_service
