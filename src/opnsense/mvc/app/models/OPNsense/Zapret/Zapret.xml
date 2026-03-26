@@ -9,7 +9,7 @@
                 <Required>Y</Required>
             </enabled>
             <waninterface type="InterfaceField">
-                <Required>Y</Required>
+                <Required>N</Required>
                 <AllowDynamic>Y</AllowDynamic>
                 <Filters>
                     <AllowVirtual>Y</AllowVirtual>
