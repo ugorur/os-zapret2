@@ -20,9 +20,10 @@
                 <Required>Y</Required>
                 <ValidationMessage>Please enter a valid port number.</ValidationMessage>
             </divertport>
-            <ports type="CSVListField">
+            <ports type="TextField">
                 <Default>80,443</Default>
                 <Required>Y</Required>
+                <Mask>/^[0-9,]+$/</Mask>
                 <ValidationMessage>Please enter comma-separated port numbers.</ValidationMessage>
             </ports>
         </general>
