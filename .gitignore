@@ -1,0 +1,4 @@
+.playwright-cli/
+*.png
+*.yaml
+!src/**/*.yaml
