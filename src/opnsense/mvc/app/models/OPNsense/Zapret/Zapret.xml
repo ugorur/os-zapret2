@@ -11,9 +11,7 @@
             <waninterface type="InterfaceField">
                 <Required>N</Required>
                 <AllowDynamic>Y</AllowDynamic>
-                <Filters>
-                    <AllowVirtual>Y</AllowVirtual>
-                </Filters>
+                <AddParentDevices>Y</AddParentDevices>
             </waninterface>
             <divertport type="PortField">
                 <Default>989</Default>
