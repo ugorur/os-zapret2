@@ -4,25 +4,25 @@
         <label>General Settings</label>
     </field>
     <field>
-        <id>general.enabled</id>
+        <id>zapret.general.enabled</id>
         <label>Enable</label>
         <type>checkbox</type>
         <help>Enable zapret2 DPI bypass service.</help>
     </field>
     <field>
-        <id>general.waninterface</id>
+        <id>zapret.general.waninterface</id>
         <label>WAN Interface</label>
         <type>dropdown</type>
         <help>Select the WAN interface where DPI bypass should be applied.</help>
     </field>
     <field>
-        <id>general.ports</id>
+        <id>zapret.general.ports</id>
         <label>Ports</label>
         <type>text</type>
         <help>Comma-separated list of ports to intercept (default: 80,443).</help>
     </field>
     <field>
-        <id>general.divertport</id>
+        <id>zapret.general.divertport</id>
         <label>Divert Port</label>
         <type>text</type>
         <help>Internal port for ipfw divert socket (default: 989). Change only if conflicting with another service.</help>
@@ -41,7 +41,7 @@
             HTTP strategies go in the HTTP field, HTTPS/TLS strategies go in the HTTPS field.]]></text>
     </field>
     <field>
-        <id>strategy.httpargs</id>
+        <id>zapret.strategy.httpargs</id>
         <label>HTTP Strategy</label>
         <type>text</type>
         <help><![CDATA[dvtws2 arguments for HTTP (port 80) bypass from blockcheck2 results.<br/>
@@ -49,7 +49,7 @@
             Example: <code>--payload=http_req --lua-desync=http_hostcase:spell=hoSt</code>]]></help>
     </field>
     <field>
-        <id>strategy.httpsargs</id>
+        <id>zapret.strategy.httpsargs</id>
         <label>HTTPS Strategy</label>
         <type>text</type>
         <help><![CDATA[dvtws2 arguments for HTTPS/TLS (port 443) bypass from blockcheck2 results.<br/>
@@ -57,7 +57,7 @@
             Example: <code>--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-4,3-20:repeats=1</code>]]></help>
     </field>
     <field>
-        <id>strategy.extraargs</id>
+        <id>zapret.strategy.extraargs</id>
         <label>Extra Arguments</label>
         <type>text</type>
         <help>Additional global dvtws2 arguments appended to the command line.</help>
@@ -68,7 +68,7 @@
         <label>Host List</label>
     </field>
     <field>
-        <id>hostlist.mode</id>
+        <id>zapret.hostlist.mode</id>
         <label>Host List Mode</label>
         <type>dropdown</type>
         <help><![CDATA[<b>All traffic</b> — apply DPI bypass to all traffic on configured ports.<br/>
@@ -76,7 +76,7 @@
             <b>Auto-detect</b> — automatically detect and add blocked domains.]]></help>
     </field>
     <field>
-        <id>hostlist.domains</id>
+        <id>zapret.hostlist.domains</id>
         <label>Domains</label>
         <type>textbox</type>
         <help>One domain per line. Only used when Host List Mode is set to "Only listed domains".</help>
