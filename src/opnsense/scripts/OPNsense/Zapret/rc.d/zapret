@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# PROVIDE: zapret
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="zapret"
+rcvar="zapret_enable"
+start_cmd="zapret_start"
+stop_cmd="zapret_stop"
+status_cmd="zapret_status"
+
+zapret_start()
+{
+    /bin/sh /usr/local/opnsense/scripts/OPNsense/Zapret/zapret_service.sh start
+}
+
+zapret_stop()
+{
+    /bin/sh /usr/local/opnsense/scripts/OPNsense/Zapret/zapret_service.sh stop
+}
+
+zapret_status()
+{
+    /bin/sh /usr/local/opnsense/scripts/OPNsense/Zapret/zapret_service.sh status
+}
+
+load_rc_config $name
+run_rc_command "$1"
