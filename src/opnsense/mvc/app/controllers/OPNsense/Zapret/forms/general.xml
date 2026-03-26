@@ -1,0 +1,98 @@
+<form>
+    <field>
+        <type>header</type>
+        <label>General Settings</label>
+    </field>
+    <field>
+        <id>general.enabled</id>
+        <label>Enable</label>
+        <type>checkbox</type>
+        <help>Enable zapret2 DPI bypass service.</help>
+    </field>
+    <field>
+        <id>general.waninterface</id>
+        <label>WAN Interface</label>
+        <type>dropdown</type>
+        <help>Select the WAN interface where DPI bypass should be applied.</help>
+    </field>
+    <field>
+        <id>general.mode</id>
+        <label>Mode</label>
+        <type>dropdown</type>
+        <help>dvtws2 uses divert sockets (recommended). tpws2 uses transparent proxy.</help>
+    </field>
+    <field>
+        <id>general.divertport</id>
+        <label>Divert Port</label>
+        <type>text</type>
+        <help>Internal port for ipfw divert socket (default: 989). Change only if conflicting with another service.</help>
+        <advanced>true</advanced>
+    </field>
+    <field>
+        <type>header</type>
+        <label>DPI Desynchronization</label>
+    </field>
+    <field>
+        <id>dpi.desyncmode</id>
+        <label>Desync Mode</label>
+        <type>dropdown</type>
+        <help><![CDATA[DPI evasion strategy. Use <b>Diagnostics > Blockcheck</b> to find the best mode for your ISP.<br/>
+            <b>fake</b> — send fake TLS ClientHello with low TTL (most common)<br/>
+            <b>multisplit</b> — split TLS ClientHello across TCP segments<br/>
+            <b>fakedsplit</b> — combine fake + split<br/>
+            <b>fakeddisorder</b> — fake + out-of-order segments<br/>
+            <b>syndata</b> — add data to SYN packet<br/>
+            <b>hopbyhop</b> — add hop-by-hop IPv6 header<br/>
+            <b>destopt</b> — add destination options header<br/>
+            <b>ipfrag1</b> — IP fragmentation]]></help>
+    </field>
+    <field>
+        <id>dpi.desyncttl</id>
+        <label>Desync TTL</label>
+        <type>text</type>
+        <help>Time-to-live for fake packets. Must be high enough to reach the DPI device but low enough to expire before reaching the server. Typical values: 4-8. Use blockcheck to determine optimal value.</help>
+    </field>
+    <field>
+        <id>dpi.desyncfooling</id>
+        <label>Desync Fooling</label>
+        <type>dropdown</type>
+        <help>Additional method to make fake packets rejected by the server but accepted by DPI. badsum = bad TCP checksum, badseq = bad sequence number, md5sig = TCP MD5 signature.</help>
+    </field>
+    <field>
+        <id>dpi.splitpos</id>
+        <label>Split Position</label>
+        <type>text</type>
+        <help>Byte position at which to split TLS ClientHello. Relevant for multisplit, fakedsplit, and fakeddisorder modes.</help>
+        <advanced>true</advanced>
+    </field>
+    <field>
+        <id>dpi.ports</id>
+        <label>Ports</label>
+        <type>text</type>
+        <help>Comma-separated list of ports to intercept (default: 80,443).</help>
+    </field>
+    <field>
+        <id>dpi.customargs</id>
+        <label>Custom Arguments</label>
+        <type>text</type>
+        <help>Additional command-line arguments passed directly to dvtws2/tpws2. Use for advanced configurations not covered by the fields above.</help>
+        <advanced>true</advanced>
+    </field>
+    <field>
+        <type>header</type>
+        <label>Host List</label>
+    </field>
+    <field>
+        <id>hostlist.mode</id>
+        <label>Host List Mode</label>
+        <type>dropdown</type>
+        <help><![CDATA[<b>All traffic</b> — apply DPI bypass to all traffic on configured ports.<br/>
+            <b>Only listed domains</b> — apply only to domains listed below.]]></help>
+    </field>
+    <field>
+        <id>hostlist.domains</id>
+        <label>Domains</label>
+        <type>textbox</type>
+        <help>One domain per line. Only used when Host List Mode is set to "Only listed domains".</help>
+    </field>
+</form>

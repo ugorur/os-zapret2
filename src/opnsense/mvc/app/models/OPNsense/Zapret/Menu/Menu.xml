@@ -1,0 +1,8 @@
+<menu>
+    <Services>
+        <Zapret VisibleName="Zapret DPI Bypass" cssClass="fa fa-shield" order="99">
+            <General VisibleName="Settings" url="/ui/zapret" order="0"/>
+            <Diagnostics VisibleName="Diagnostics" url="/ui/zapret/diagnostics" order="1"/>
+        </Zapret>
+    </Services>
+</menu>

@@ -1,0 +1,13 @@
+Zapret2 DPI Bypass Plugin for OPNsense
+
+Provides a GUI-managed anti-censorship tool using zapret2 (https://github.com/bol-van/zapret2).
+Bypasses deep packet inspection (DPI) used by ISPs to block websites via SNI filtering.
+
+Features:
+- dvtws2 divert socket integration (ipfw)
+- Configurable DPI desynchronization strategies
+- Domain hostlist support
+- Blockcheck diagnostics
+- Automatic ipfw/ipdivert kernel module management
+
+WWW: https://github.com/ugorur/os-zapret2

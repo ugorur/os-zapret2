@@ -1,0 +1,9 @@
+<acl>
+    <page-services-zapret>
+        <name>Services: Zapret DPI Bypass</name>
+        <patterns>
+            <pattern>ui/zapret/*</pattern>
+            <pattern>api/zapret/*</pattern>
+        </patterns>
+    </page-services-zapret>
+</acl>

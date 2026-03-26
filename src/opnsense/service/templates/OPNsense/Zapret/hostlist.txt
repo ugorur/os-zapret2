@@ -1,0 +1,3 @@
+{% if helpers.exists('OPNsense.Zapret.hostlist.domains') and OPNsense.Zapret.hostlist.mode == 'list' %}
+{{ OPNsense.Zapret.hostlist.domains }}
+{% endif %}
