@@ -26,37 +26,61 @@ Many ISPs use DPI to inspect TLS ClientHello packets and block websites based on
 
 ## Installation
 
-### Method 1: Manual Package Install
-
-1. Download the latest `.pkg` from [Releases](https://github.com/ugorur/os-zapret2/releases)
-2. Copy to your firewall: `scp os-zapret2-1.0.pkg root@firewall:/tmp/`
-3. Install: `pkg add /tmp/os-zapret2-1.0.pkg`
-4. Run initial setup: `/usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh`
-5. Navigate to **Services > Zapret DPI Bypass** in the GUI
-
-### Method 2: From Source
+### Method 1: Install from Release
 
 ```sh
-# On the OPNsense firewall
+# On the OPNsense firewall (via SSH)
+
+# Download the latest release
+fetch -o /tmp/os-zapret2.pkg https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.0.0.pkg
+
+# Extract to OPNsense directories
+cd /tmp && tar -xJf os-zapret2.pkg -C /usr/local
+
+# Set permissions
+chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/*.sh
+chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/rc.d/zapret
+
+# Download and compile zapret2
+/usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
+
+# Restart configd to register the plugin
+service configd restart
+```
+
+Then navigate to **Services > Zapret DPI Bypass** in the GUI.
+
+### Method 2: Install from Source
+
+```sh
+# On the OPNsense firewall (via SSH)
 cd /tmp
 git clone https://github.com/ugorur/os-zapret2.git
 cd os-zapret2
-# Copy files to OPNsense directories
+
+# Copy plugin files to OPNsense
 cp -r src/opnsense/* /usr/local/opnsense/
-# Run setup to download and compile zapret2
+
+# Set permissions
+chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/*.sh
+chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/rc.d/zapret
+
+# Download and compile zapret2
 /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
-# Restart configd to pick up the new actions
+
+# Restart configd to register the plugin
 service configd restart
 ```
 
 ## Quick Start
 
-1. Go to **Services > Zapret DPI Bypass > Settings**
-2. Check **Enable**
-3. Select your **WAN Interface**
-4. Set **Desync Mode** to `fake` and **Desync TTL** to `6` (good starting point)
-5. Click **Save** and **Start**
-6. Test: Go to **Diagnostics** tab, enter a blocked domain, click **Test**
+1. Run `blockcheck2.sh` via SSH to find working strategies for your ISP (see [Finding the Right Strategy](#finding-the-right-strategy))
+2. Go to **Services > Zapret DPI Bypass > Settings**
+3. Check **Enable** and select your **WAN Interface**
+4. Paste the HTTP strategy from blockcheck2 results into the **HTTP Strategy** field
+5. Paste the HTTPS strategy into the **HTTPS Strategy** field
+6. Click **Save** then **Start**
+7. Test: Go to **Diagnostics** tab, enter a blocked domain, click **Test**
 
 ## Finding the Right Strategy
 
