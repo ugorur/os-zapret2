@@ -50,6 +50,10 @@
                 <Required>N</Required>
                 <Mask>/^[a-zA-Z0-9\.\-\n\r\s]*$/</Mask>
             </domains>
+            <excludedomains type="TextField">
+                <Required>N</Required>
+                <Mask>/^[a-zA-Z0-9\.\-\n\r\s]*$/</Mask>
+            </excludedomains>
         </hostlist>
     </items>
 </model>

@@ -1,0 +1,3 @@
+{% if helpers.exists('OPNsense.Zapret.hostlist.excludedomains') and OPNsense.Zapret.hostlist.excludedomains != '' %}
+{{ OPNsense.Zapret.hostlist.excludedomains }}
+{% endif %}

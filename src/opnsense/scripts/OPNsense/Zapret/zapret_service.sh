@@ -8,6 +8,7 @@ CONFIG="${ZAPRET_DIR}/zapret.conf"
 PIDFILE="/var/run/dvtws2.pid"
 DVTWS_BIN="${ZAPRET_DIR}/binaries/my/dvtws2"
 HOSTLIST="${ZAPRET_DIR}/hostlist.txt"
+HOSTLIST_EXCLUDE="${ZAPRET_DIR}/hostlist-exclude.txt"
 AUTOHOSTLIST="${ZAPRET_DIR}/autohostlist.txt"
 LUA_LIB="${ZAPRET_DIR}/lua/zapret-lib.lua"
 LUA_ANTIDPI="${ZAPRET_DIR}/lua/zapret-antidpi.lua"
@@ -102,6 +103,11 @@ start_service() {
     elif [ "${HOSTLIST_MODE}" = "auto" ]; then
         touch "${AUTOHOSTLIST}" 2>/dev/null
         args="${args} --hostlist-auto=${AUTOHOSTLIST}"
+    fi
+
+    # Add exclude list (domains that should NOT be modified by zapret)
+    if [ -f "${HOSTLIST_EXCLUDE}" ] && [ -s "${HOSTLIST_EXCLUDE}" ]; then
+        args="${args} --hostlist-exclude=${HOSTLIST_EXCLUDE}"
     fi
 
     # Add extra arguments

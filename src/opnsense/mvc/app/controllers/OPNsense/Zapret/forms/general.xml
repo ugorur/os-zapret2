@@ -81,4 +81,11 @@
         <type>textbox</type>
         <help>One domain per line. Only used when Host List Mode is set to "Only listed domains".</help>
     </field>
+    <field>
+        <id>zapret.hostlist.excludedomains</id>
+        <label>Exclude Domains</label>
+        <type>textbox</type>
+        <help><![CDATA[Domains to <b>exclude</b> from DPI bypass (one per line). Traffic to these domains will pass through unmodified.<br/>
+            Use this if zapret2 breaks connectivity to specific sites (e.g. government portals, banking sites).]]></help>
+    </field>
 </form>
