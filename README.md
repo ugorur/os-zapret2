@@ -37,13 +37,16 @@ will auto-start on every reboot while **Enabled** is checked.
 # On the OPNsense firewall (via SSH, as root)
 
 fetch -o /tmp/os-zapret2.pkg \
-    https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.0.pkg
+    https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.5.pkg
 
 pkg add /tmp/os-zapret2.pkg
 
-# Compile the dvtws2 binary (one-time, ~1 min)
+# Bootstrap dependencies (luajit, jq, git-lite, pkgconf from FreeBSD's
+# main pkg repo) and compile dvtws2. One-time, ~1 minute.
 /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
 ```
+
+**Note:** the `.pkg` does not declare `luajit` / `jq` as dependencies because they're not in OPNsense's package repository (they're in FreeBSD's main repo, which is enabled but not always primed on a fresh install). `setup.sh` handles them — running it after `pkg add` is required before the service can start.
 
 Then open **Services → Zapret DPI Bypass** in the GUI and configure it.
 

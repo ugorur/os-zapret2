@@ -20,4 +20,28 @@ if [ -x /usr/local/sbin/configctl ]; then
     /usr/local/sbin/configctl template reload OPNsense/Zapret >/dev/null 2>&1 || true
 fi
 
+cat <<'NEXT_STEPS'
+
+================================================================
+os-zapret2 installed. Next steps before first use:
+
+  1. Bootstrap dependencies and compile dvtws2 (one-time, ~1 min):
+
+       /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
+
+     This installs luajit, jq, git-lite, pkgconf from FreeBSD's pkg
+     repo and clones+compiles bol-van/zapret2.
+
+  2. In the GUI: Services > Zapret DPI Bypass > Settings
+       - Enable the service
+       - Pick your WAN interface
+       - Paste your DPI strategies (or use Diagnostics > Blockcheck
+         to find ones that work for your ISP)
+       - Save & Apply
+
+The service auto-starts on every reboot once Enable is checked.
+================================================================
+
+NEXT_STEPS
+
 exit 0

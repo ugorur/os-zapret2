@@ -10,10 +10,18 @@ set -e
 
 echo "=== zapret2 setup ==="
 
-# Install build dependencies if missing
-pkg info -q pkgconf || pkg install -y pkgconf
-pkg info -q luajit || pkg install -y luajit
+# Install build + runtime dependencies if missing.
+# These come from FreeBSD's main pkg repo (not OPNsense's), which on a
+# fresh OPNsense is enabled but the catalogue may not be primed yet.
+pkg update -q
+
+pkg info -q pkgconf  || pkg install -y pkgconf
+pkg info -q luajit   || pkg install -y luajit
 pkg info -q git-lite || pkg install -y git-lite
+
+# jq is required at runtime by zapret_service.sh to parse pluginctl JSON
+# when resolving the WAN interface name.
+pkg info -q jq       || pkg install -y jq
 
 # Clone or update zapret2
 if [ -d "${ZAPRET_DIR}/.git" ]; then
