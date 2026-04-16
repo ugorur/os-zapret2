@@ -179,12 +179,14 @@ stop_service() {
 }
 
 status_service() {
+    # Output must match the convention ApiMutableServiceControllerBase
+    # parses: substring "is running" → running; "not running" → stopped.
+    # Anything else gets bucketed as "unknown" and the service-status
+    # icons in the page header stay hidden.
     if [ -f "${PIDFILE}" ] && kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
-        local pid=$(cat ${PIDFILE})
-        local rules=$(ipfw show ${RULE_BASE} 2>/dev/null | wc -l | tr -d ' ')
-        echo '{"status": "running", "pid": "'${pid}'", "ipfw_rules": '${rules}'}'
+        echo "zapret is running as pid $(cat ${PIDFILE})"
     else
-        echo '{"status": "stopped"}'
+        echo "zapret is not running"
     fi
 }
 
