@@ -92,6 +92,19 @@ start_service() {
     sysctl net.inet.ip.fw.enable=1  >/dev/null 2>&1
     sysctl net.inet6.ip6.fw.enable=1 >/dev/null 2>&1
 
+    # CRITICAL: bounce pf to put ipfw back in the pfil chain.
+    # On modern OPNsense/pfsense (FreeBSD 14+), after ipfw is enabled,
+    # pf's pfil hooks own the filter chain and divert reinjection loses
+    # its `diverted` mbuf flag during the next stack traversal. The result
+    # is an infinite loop: every reinjected packet matches the divert rule
+    # again and is sent back to dvtws2 — kernel buffers fill up, fetch
+    # times out, internet effectively breaks.
+    # The fix (also documented in upstream zapret2's pfsense init script)
+    # is to disable+re-enable pf, which re-registers the pfil hooks in an
+    # order that preserves the divert flag across reinjection.
+    pfctl -d >/dev/null 2>&1 || true
+    pfctl -e >/dev/null 2>&1 || true
+
     # Safety: ensure default policy is accept (FreeBSD with
     # IPFIREWALL_DEFAULT_TO_ACCEPT, which OPNsense uses, satisfies this).
     local default_accept=$(sysctl -n net.inet.ip.fw.default_to_accept 2>/dev/null)
@@ -160,14 +173,18 @@ start_service() {
     remove_divert_rules
 
     # Outbound divert rules — one per port.
-    # "not sockarg" prevents re-diverting packets dvtws2 already reinjected
-    # (it marks them with sockarg=0x200 so they skip the divert on egress).
+    # `not diverted` excludes packets coming back from the divert socket
+    # (dvtws2's reinjections), preventing the loop.
+    # `not sockarg` excludes the fake/probe packets dvtws2 sometimes
+    # generates from a raw socket (marked with SO_USER_COOKIE=0x200).
+    # `xmit ${wan_dev}` scopes to outbound on the WAN device only — LAN
+    # traffic and traffic on other interfaces is left alone.
     local rulenum=${RULE_BASE}
     local IFS_OLD="${IFS}"
     IFS=","
     for port in ${PORTS}; do
         ipfw -qf add ${rulenum} divert ${DIVERT_PORT} \
-            tcp from any to any ${port} out not sockarg xmit ${wan_dev}
+            tcp from any to any ${port} out not diverted not sockarg xmit ${wan_dev}
         rulenum=$((rulenum + 1))
     done
     IFS="${IFS_OLD}"
