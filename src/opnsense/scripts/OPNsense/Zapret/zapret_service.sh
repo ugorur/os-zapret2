@@ -1,7 +1,18 @@
 #!/bin/sh
 
 # zapret_service.sh — Service management for zapret2 on OPNsense
-# Called by configd via actions_zapret.conf
+# Called by configd via actions_zapret.conf.
+#
+# Architecture (rev 7+): pf divert-to instead of ipfw divert.
+#   - pf rule in our own anchor (userrules/zapret) matches outbound HTTP/HTTPS
+#     on the WAN interface and diverts to dvtws2 via 127.0.0.1:DIVERT_PORT.
+#   - pf's stateful divert handling avoids the infinite re-divert loop that
+#     ipfw divert exhibits on Proxmox/virtio (and is fragile on bare-metal+
+#     PPPoE too). The anchor survives main-pf reloads (OPNsense GUI saves).
+#   - dvtws2 unchanged: receives, applies LUA-driven desync, reinjects.
+#   - safety watchdog (separate script) probes a control URL through the
+#     bypass; auto-stops the service after 3 consecutive failures so a
+#     misconfigured strategy can't kill household internet for long.
 
 ZAPRET_DIR="/usr/local/etc/zapret2"
 CONFIG="${ZAPRET_DIR}/zapret.conf"
@@ -17,8 +28,7 @@ AUTOHOSTLIST="${ZAPRET_DIR}/autohostlist.txt"
 LUA_LIB="${ZAPRET_DIR}/lua/zapret-lib.lua"
 LUA_ANTIDPI="${ZAPRET_DIR}/lua/zapret-antidpi.lua"
 
-# ipfw rule numbers reserved for zapret (use high range to avoid conflicts)
-RULE_BASE=19000
+PF_ANCHOR="userrules/zapret"
 
 load_config() {
     if [ ! -f "${CONFIG}" ]; then
@@ -40,7 +50,6 @@ resolve_interface() {
     # Map an OPNsense logical interface (opt11, wan, lan, …) to its kernel
     # device. pluginctl -4 emits JSON like:
     #   {"opt11":[{"address":"...","device":"pppoe2", ...}]}
-    # so we extract the .device field with jq. (jq is a declared pkg dep.)
     local dev=""
     if [ -x /usr/local/bin/jq ]; then
         dev=$(/usr/local/sbin/pluginctl -4 "${iface}" 2>/dev/null \
@@ -51,18 +60,12 @@ resolve_interface() {
         return
     fi
 
-    # Last resort: hand the original string back to the caller. ipfw will
-    # reject an invalid device, which is preferable to silently constructing
-    # a malformed rule.
+    # Last resort: hand the original string back to the caller.
     echo "${iface}"
 }
 
-remove_divert_rules() {
-    local r=${RULE_BASE}
-    while [ ${r} -le $((RULE_BASE + 10)) ]; do
-        ipfw -q delete ${r} 2>/dev/null
-        r=$((r + 1))
-    done
+remove_pf_anchor() {
+    /sbin/pfctl -a "${PF_ANCHOR}" -F rules >/dev/null 2>&1 || true
 }
 
 start_service() {
@@ -84,39 +87,15 @@ start_service() {
         exit 1
     fi
 
-    # Load required kernel modules
-    kldstat -q -m ipfw     || kldload ipfw
+    # Load required kernel modules. ipdivert is the kernel side of pf's
+    # divert-to (and ipfw divert too — same infrastructure either way).
     kldstat -q -m ipdivert || kldload ipdivert
 
-    # Enable ipfw enforcement at the kernel level. The module being loaded
-    # is not enough — net.inet.ip.fw.enable must also be 1, otherwise our
-    # divert rules sit in the table but match zero packets. This was the
-    # root cause of "bypass stopped working after reboot" — on default
-    # OPNsense the sysctl is 0 and nothing turns it on for us.
-    # Both v4 and v6 enabled to match FreeBSD's default chain registration.
-    sysctl net.inet.ip.fw.enable=1  >/dev/null 2>&1
-    sysctl net.inet6.ip6.fw.enable=1 >/dev/null 2>&1
-
-    # NOTE: do NOT call `pfctl -d ; pfctl -e` here, do NOT call
-    # /usr/local/opnsense/scripts/shaper/sync_fw_hooks.py. Both alter the
-    # pfil chain order so that ipfw runs *before* pf on outbound (pre-NAT
-    # divert). On real hardware that turns reinjected packets into an
-    # infinite loop because the lua-marked sockarg gets stripped by the
-    # netgraph PPPoE encap. The natural chain order (pf-then-ipfw on out,
-    # which is what you get from just sysctl-enabling ipfw) keeps divert
-    # post-NAT and lua's sockarg marker is preserved across reinjection,
-    # so `not sockarg` properly breaks the loop. Verified empirically on
-    # the live box: with lua scripts + `not sockarg`, counter caps at the
-    # actual packet count (no runaway).
-
-    # Safety: ensure default policy is accept (FreeBSD with
-    # IPFIREWALL_DEFAULT_TO_ACCEPT, which OPNsense uses, satisfies this).
-    local default_accept=$(sysctl -n net.inet.ip.fw.default_to_accept 2>/dev/null)
-    if [ "${default_accept}" != "1" ]; then
-        ipfw -q add 65534 allow all from any to any
-    fi
-
     local wan_dev=$(resolve_interface "${WAN_IF}")
+    if [ -z "${wan_dev}" ]; then
+        echo "could not resolve WAN interface '${WAN_IF}' to a kernel device" >&2
+        exit 1
+    fi
 
     # Build dvtws2 args
     local args="--port=${DIVERT_PORT}"
@@ -138,17 +117,8 @@ start_service() {
 
     [ -n "${EXTRA_ARGS}" ] && args="${args} ${EXTRA_ARGS}"
 
-    # IMPORTANT: dvtws2 must be reliably listening on the divert socket for
-    # the lifetime of the divert rules. If the listener dies while rules
-    # remain, FreeBSD silently drops the matching packets — that's the
-    # household-internet-is-down failure mode.
-    #
-    # Solution: run dvtws2 under daemon(8) with -r so a crash auto-restarts
-    # within R seconds. We also write supervisor + child pidfiles so
-    # stop_service can take both down cleanly.
-    #
-    # Note: dvtws2 runs in foreground (no --daemon flag) so daemon(8) keeps
-    # supervising it; --pidfile is also dropped because daemon -p handles it.
+    # Run dvtws2 under daemon(8) -r so a crash auto-restarts within 1s.
+    # No --daemon / --pidfile to dvtws2 — daemon(8) manages those.
     /usr/sbin/daemon \
         -P "${SUPERVISOR_PIDFILE}" \
         -p "${PIDFILE}" \
@@ -157,7 +127,6 @@ start_service() {
         -f \
         ${DVTWS_BIN} ${args} --sockarg=0x200
 
-    # Wait for daemon(8) to fork+exec dvtws2
     sleep 1
     if [ ! -f "${SUPERVISOR_PIDFILE}" ] || ! kill -0 "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null; then
         echo "dvtws2 supervisor failed to start" >&2
@@ -173,29 +142,21 @@ start_service() {
         fi
     fi
 
-    # Replace any stale divert rules
-    remove_divert_rules
-
-    # Outbound divert rules — one per port.
-    # Two complementary loop-prevention guards:
-    #   `not diverted` — excludes packets the kernel has marked as coming
-    #     back from the divert socket. Works on virtio/Ethernet WANs.
-    #   `not sockarg`  — excludes packets dvtws2's lua scripts have marked
-    #     with SO_USER_COOKIE=0x200. Works on PPPoE WANs where netgraph
-    #     encap strips the `diverted` flag but preserves SO_USER_COOKIE.
-    # Together they prevent the infinite re-divert loop on both topologies
-    # we've tested (Proxmox/virtio test bench AND bare-metal+PPPoE live).
-    # `xmit ${wan_dev}` scopes to outbound on the WAN device only — LAN
-    # traffic and traffic on other interfaces is left alone.
-    local rulenum=${RULE_BASE}
-    local IFS_OLD="${IFS}"
-    IFS=","
-    for port in ${PORTS}; do
-        ipfw -qf add ${rulenum} divert ${DIVERT_PORT} \
-            tcp from any to any ${port} out not diverted not sockarg xmit ${wan_dev}
-        rulenum=$((rulenum + 1))
-    done
-    IFS="${IFS_OLD}"
+    # Install pf divert-to rule via our private anchor. The anchor survives
+    # OPNsense's pf rule reloads (verified empirically); we just need to
+    # (re-)install it whenever the service starts.
+    #
+    # `pass out quick on $WAN ... divert-to 127.0.0.1 port $DIVERT_PORT keep state`
+    # diverts the first packet of each new outbound HTTP/HTTPS connection
+    # to dvtws2; subsequent packets of the same connection are tied to the
+    # state, dvtws2 sees them too, and reinjections are NOT re-diverted
+    # because pf's divert-to handles loop prevention via state. This is the
+    # critical difference vs ipfw divert which infinite-loops on virtio.
+    remove_pf_anchor
+    PORT_LIST=$(echo "${PORTS}" | sed 's/,/, /g')   # "80,443" → "80, 443"
+    /sbin/pfctl -a "${PF_ANCHOR}" -f - <<EOF
+pass out quick on ${wan_dev} inet proto tcp from any to any port { ${PORT_LIST} } divert-to 127.0.0.1 port ${DIVERT_PORT} keep state
+EOF
 
     # Start the safety watchdog under daemon(8) too. It probes a control URL
     # every minute and stops the service if 3 consecutive checks fail —
@@ -215,9 +176,9 @@ start_service() {
 }
 
 stop_service() {
-    # Remove divert rules FIRST so the gap between supervisor-kill and
-    # daemon respawn doesn't drop traffic.
-    remove_divert_rules
+    # Remove pf divert-to rule FIRST so traffic flows normally during the
+    # tear-down window.
+    remove_pf_anchor
 
     # Kill the watchdog FIRST (before its supervisor can respawn it)
     if [ -f "${WATCHDOG_SUPERVISOR_PIDFILE}" ]; then
@@ -230,7 +191,7 @@ stop_service() {
     fi
     rm -f /var/run/zapret-watchdog.state
 
-    # Kill the supervisor so daemon -r doesn't respawn dvtws2
+    # Kill the dvtws2 supervisor so daemon -r doesn't respawn dvtws2
     if [ -f "${SUPERVISOR_PIDFILE}" ]; then
         kill "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null
         rm -f "${SUPERVISOR_PIDFILE}"
@@ -249,8 +210,6 @@ stop_service() {
 status_service() {
     # Output must match the convention ApiMutableServiceControllerBase
     # parses: substring "is running" → running; "not running" → stopped.
-    # Anything else falls through to "unknown" and the page-header
-    # service-status icons stay hidden.
     if [ -f "${PIDFILE}" ] && kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
         echo "zapret is running as pid $(cat ${PIDFILE})"
     else
