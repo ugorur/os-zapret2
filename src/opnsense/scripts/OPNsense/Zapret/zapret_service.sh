@@ -6,6 +6,7 @@
 ZAPRET_DIR="/usr/local/etc/zapret2"
 CONFIG="${ZAPRET_DIR}/zapret.conf"
 PIDFILE="/var/run/dvtws2.pid"
+SUPERVISOR_PIDFILE="/var/run/dvtws2-supervisor.pid"
 DVTWS_BIN="${ZAPRET_DIR}/binaries/my/dvtws2"
 HOSTLIST="${ZAPRET_DIR}/hostlist.txt"
 HOSTLIST_EXCLUDE="${ZAPRET_DIR}/hostlist-exclude.txt"
@@ -18,7 +19,7 @@ RULE_BASE=19000
 
 load_config() {
     if [ ! -f "${CONFIG}" ]; then
-        echo '{"status": "error", "message": "Configuration file not found. Save settings first."}'
+        echo "zapret is not running (configuration file not found — save settings first)"
         exit 1
     fi
     . "${CONFIG}"
@@ -53,60 +54,60 @@ resolve_interface() {
     echo "${iface}"
 }
 
+remove_divert_rules() {
+    local r=${RULE_BASE}
+    while [ ${r} -le $((RULE_BASE + 10)) ]; do
+        ipfw -q delete ${r} 2>/dev/null
+        r=$((r + 1))
+    done
+}
+
 start_service() {
     load_config
 
     if [ "${ZAPRET_ENABLED}" != "1" ]; then
-        echo '{"status": "disabled"}'
+        echo "zapret is not running (disabled in settings)"
         exit 0
     fi
 
-    # Check if already running
-    if [ -f "${PIDFILE}" ] && kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
-        echo '{"status": "already_running"}'
+    # Already running?
+    if [ -f "${SUPERVISOR_PIDFILE}" ] && kill -0 "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null; then
+        echo "zapret is already running as pid $(cat ${PIDFILE} 2>/dev/null || echo unknown)"
         exit 0
     fi
 
-    # Verify binary exists
     if [ ! -x "${DVTWS_BIN}" ]; then
-        echo '{"status": "error", "message": "dvtws2 binary not found. Run setup first."}'
+        echo "dvtws2 binary not found at ${DVTWS_BIN} — run setup.sh first" >&2
         exit 1
     fi
 
-    # Load kernel modules
-    kldstat -q -m ipfw || kldload ipfw
+    # Load required kernel modules
+    kldstat -q -m ipfw     || kldload ipfw
     kldstat -q -m ipdivert || kldload ipdivert
 
-    # Verify ipfw default-accept (safety check)
+    # Enable ipfw enforcement at the kernel level. The module being loaded
+    # is not enough — net.inet.ip.fw.enable must also be 1, otherwise our
+    # divert rules sit in the table but match zero packets.
+    # Both v4 and v6 enabled together so consistent with FreeBSD defaults.
+    sysctl net.inet.ip.fw.enable=1  >/dev/null 2>&1
+    sysctl net.inet6.ip6.fw.enable=1 >/dev/null 2>&1
+
+    # Safety: ensure default policy is accept (FreeBSD with
+    # IPFIREWALL_DEFAULT_TO_ACCEPT, which OPNsense uses, satisfies this).
     local default_accept=$(sysctl -n net.inet.ip.fw.default_to_accept 2>/dev/null)
     if [ "${default_accept}" != "1" ]; then
         ipfw -q add 65534 allow all from any to any
     fi
 
-    # Resolve WAN interface name
     local wan_dev=$(resolve_interface "${WAN_IF}")
 
-    # Build dvtws2 arguments
+    # Build dvtws2 args
     local args="--port=${DIVERT_PORT}"
+    [ -f "${LUA_LIB}" ]      && args="${args} --lua-init=@${LUA_LIB}"
+    [ -f "${LUA_ANTIDPI}" ]  && args="${args} --lua-init=@${LUA_ANTIDPI}"
+    [ -n "${HTTP_ARGS}" ]    && args="${args} ${HTTP_ARGS}"
+    [ -n "${HTTPS_ARGS}" ]   && args="${args} ${HTTPS_ARGS}"
 
-    # Load Lua libraries (lib must come before antidpi)
-    if [ -f "${LUA_LIB}" ]; then
-        args="${args} --lua-init=@${LUA_LIB}"
-    fi
-    if [ -f "${LUA_ANTIDPI}" ]; then
-        args="${args} --lua-init=@${LUA_ANTIDPI}"
-    fi
-
-    # Add strategy arguments directly
-    # Users paste the full dvtws2 args from blockcheck2 results
-    if [ -n "${HTTP_ARGS}" ]; then
-        args="${args} ${HTTP_ARGS}"
-    fi
-    if [ -n "${HTTPS_ARGS}" ]; then
-        args="${args} ${HTTPS_ARGS}"
-    fi
-
-    # Add hostlist if configured
     if [ "${HOSTLIST_MODE}" = "list" ] && [ -f "${HOSTLIST}" ] && [ -s "${HOSTLIST}" ]; then
         args="${args} --hostlist=${HOSTLIST}"
     elif [ "${HOSTLIST_MODE}" = "auto" ]; then
@@ -114,75 +115,92 @@ start_service() {
         args="${args} --hostlist-auto=${AUTOHOSTLIST}"
     fi
 
-    # Add exclude list (domains that should NOT be modified by zapret)
     if [ -f "${HOSTLIST_EXCLUDE}" ] && [ -s "${HOSTLIST_EXCLUDE}" ]; then
         args="${args} --hostlist-exclude=${HOSTLIST_EXCLUDE}"
     fi
 
-    # Add extra arguments
-    if [ -n "${EXTRA_ARGS}" ]; then
-        args="${args} ${EXTRA_ARGS}"
-    fi
+    [ -n "${EXTRA_ARGS}" ] && args="${args} ${EXTRA_ARGS}"
 
-    # IMPORTANT: Start dvtws2 BEFORE adding ipfw rules
-    # If dvtws2 is not listening on the divert port, diverted packets are dropped
-    # --sockarg marks reinjected packets so ipfw "not sockarg" skips them
-    ${DVTWS_BIN} ${args} --sockarg=0x200 --daemon --pidfile=${PIDFILE}
+    # IMPORTANT: dvtws2 must be reliably listening on the divert socket for
+    # the lifetime of the divert rules. If the listener dies while rules
+    # remain, FreeBSD silently drops the matching packets — that's the
+    # household-internet-is-down failure mode.
+    #
+    # Solution: run dvtws2 under daemon(8) with -r so a crash auto-restarts
+    # within R seconds. We also write supervisor + child pidfiles so
+    # stop_service can take both down cleanly.
+    #
+    # Note: dvtws2 runs in foreground (no --daemon flag) so daemon(8) keeps
+    # supervising it; --pidfile is also dropped because daemon -p handles it.
+    /usr/sbin/daemon \
+        -P "${SUPERVISOR_PIDFILE}" \
+        -p "${PIDFILE}" \
+        -r -R 1 \
+        -t zapret2 \
+        -f \
+        ${DVTWS_BIN} ${args} --sockarg=0x200
 
-    # Verify dvtws2 started successfully
+    # Wait for daemon(8) to fork+exec dvtws2
     sleep 1
-    if [ ! -f "${PIDFILE}" ] || ! kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
-        echo '{"status": "error", "message": "dvtws2 failed to start. Check strategy arguments."}'
+    if [ ! -f "${SUPERVISOR_PIDFILE}" ] || ! kill -0 "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null; then
+        echo "dvtws2 supervisor failed to start" >&2
         exit 1
     fi
+    if [ ! -f "${PIDFILE}" ] || ! kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
+        sleep 2
+        if [ ! -f "${PIDFILE}" ] || ! kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
+            kill "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null
+            rm -f "${SUPERVISOR_PIDFILE}"
+            echo "dvtws2 child failed to start — check strategy arguments" >&2
+            exit 1
+        fi
+    fi
 
-    # Delete old rules first
-    local r=${RULE_BASE}
-    while [ ${r} -le $((RULE_BASE + 10)) ]; do
-        ipfw -q delete ${r} 2>/dev/null
-        r=$((r + 1))
-    done
+    # Replace any stale divert rules
+    remove_divert_rules
 
-    # Outbound-only divert rules — one per port
-    # "not sockarg" prevents re-diverting packets already processed by dvtws2
-    # dvtws2 marks reinjected packets with sockarg so they skip the divert rule
+    # Outbound divert rules — one per port.
+    # "not sockarg" prevents re-diverting packets dvtws2 already reinjected
+    # (it marks them with sockarg=0x200 so they skip the divert on egress).
     local rulenum=${RULE_BASE}
     local IFS_OLD="${IFS}"
     IFS=","
     for port in ${PORTS}; do
-        ipfw -qf add ${rulenum} divert ${DIVERT_PORT} tcp from any to any ${port} out not sockarg xmit ${wan_dev}
+        ipfw -qf add ${rulenum} divert ${DIVERT_PORT} \
+            tcp from any to any ${port} out not sockarg xmit ${wan_dev}
         rulenum=$((rulenum + 1))
     done
     IFS="${IFS_OLD}"
 
-    echo '{"status": "started", "pid": "'$(cat ${PIDFILE})'", "interface": "'${wan_dev}'"}'
+    echo "zapret is running as pid $(cat ${PIDFILE}) (supervisor pid $(cat ${SUPERVISOR_PIDFILE}))"
 }
 
 stop_service() {
-    # IMPORTANT: Remove ipfw rules BEFORE stopping dvtws2
-    # This prevents packets from being diverted to a dead socket
-        # Delete rule range 19000-19010
-    local r=${RULE_BASE}
-    while [ ${r} -le $((RULE_BASE + 10)) ]; do
-        ipfw -q delete ${r} 2>/dev/null
-        r=$((r + 1))
-    done
+    # Remove divert rules FIRST so the gap between supervisor-kill and
+    # daemon respawn doesn't drop traffic.
+    remove_divert_rules
 
-    # Stop dvtws2
+    # Kill the supervisor so daemon -r doesn't respawn dvtws2
+    if [ -f "${SUPERVISOR_PIDFILE}" ]; then
+        kill "$(cat ${SUPERVISOR_PIDFILE})" 2>/dev/null
+        rm -f "${SUPERVISOR_PIDFILE}"
+    fi
+
+    # Then dvtws2 itself, in case it survives or wasn't supervised
     if [ -f "${PIDFILE}" ]; then
         kill "$(cat ${PIDFILE})" 2>/dev/null
         rm -f "${PIDFILE}"
     fi
     killall dvtws2 2>/dev/null
 
-    echo '{"status": "stopped"}'
+    echo "zapret is not running (stopped)"
 }
 
 status_service() {
     # Output must match the convention ApiMutableServiceControllerBase
     # parses: substring "is running" → running; "not running" → stopped.
-    # Anything else gets bucketed as "unknown" and the service-status
-    # icons in the page header stay hidden.
+    # Anything else falls through to "unknown" and the page-header
+    # service-status icons stay hidden.
     if [ -f "${PIDFILE}" ] && kill -0 "$(cat ${PIDFILE})" 2>/dev/null; then
         echo "zapret is running as pid $(cat ${PIDFILE})"
     else
@@ -205,25 +223,13 @@ reconfigure_service() {
 }
 
 case "$1" in
-    start)
-        start_service
-        ;;
-    stop)
-        stop_service
-        ;;
-    restart)
-        stop_service > /dev/null 2>&1
-        sleep 1
-        start_service
-        ;;
-    status)
-        status_service
-        ;;
-    reconfigure)
-        reconfigure_service
-        ;;
+    start)       start_service ;;
+    stop)        stop_service ;;
+    restart)     stop_service > /dev/null 2>&1; sleep 1; start_service ;;
+    status)      status_service ;;
+    reconfigure) reconfigure_service ;;
     *)
-        echo '{"status": "error", "message": "Usage: zapret_service.sh {start|stop|restart|status|reconfigure}"}'
+        echo "usage: zapret_service.sh {start|stop|restart|status|reconfigure}" >&2
         exit 1
         ;;
 esac
