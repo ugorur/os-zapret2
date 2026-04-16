@@ -100,17 +100,39 @@
                     return;
                 }
 
-                $("#blockcheckSummary").html('Tested <strong>' + $('<div>').text(bc.domain).html() +
-                    '</strong>. Strategies that worked are listed below — copy one into the HTTPS Strategy field on the Settings page.');
+                // Detect the "site is not censored from this firewall" case.
+                // blockcheck2 reports lines like "... : working without bypass"
+                // when the baseline test (no DPI evasion) already succeeds.
+                // Picking such a line as a strategy makes no sense — surface
+                // a clear explanation instead of asking the user to copy it.
+                var winning = (bc.winning || []).filter(function(l){ return l.trim() !== ''; });
+                var allBaseline = winning.length > 0 && winning.every(function(l){
+                    return /working without bypass/i.test(l);
+                });
+
+                var domEsc = $('<div>').text(bc.domain).html();
+
+                if (allBaseline) {
+                    $("#blockcheckSummary").html(
+                        '<span class="text-success"><strong>' + domEsc + '</strong> reaches its server fine from this firewall ' +
+                        'without any DPI bypass.</span><br>' +
+                        'This means either (a) your ISP does not block this domain, or (b) your firewall\'s DNS resolver ' +
+                        '(e.g. AdGuard, Unbound DoH) is already bypassing a DNS-based block. ' +
+                        'If LAN clients still cannot reach it, the issue is on the client side — usually because clients ' +
+                        'are using their own DNS instead of this firewall. Try a domain you know is blocked at the TLS/SNI ' +
+                        'layer to find a useful strategy.'
+                    );
+                } else {
+                    $("#blockcheckSummary").html('Tested <strong>' + domEsc +
+                        '</strong>. Strategies that worked are listed below — copy one into the HTTPS Strategy field on the Settings page.');
+                }
 
                 // List winning strategies
                 var html = '';
-                if (bc.winning && bc.winning.length > 0) {
+                if (winning.length > 0) {
                     html = '<ul style="font-family: monospace; font-size: 12px;">';
-                    bc.winning.forEach(function(line) {
-                        if (line.trim() !== '') {
-                            html += '<li>' + $('<div>').text(line).html() + '</li>';
-                        }
+                    winning.forEach(function(line) {
+                        html += '<li>' + $('<div>').text(line).html() + '</li>';
                     });
                     html += '</ul>';
                 } else {

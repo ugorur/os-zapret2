@@ -81,11 +81,18 @@ LOG=$(mktemp /tmp/zapret-blockcheck.XXXXXX) || {
 # blockcheck2 has a BATCH=1 env mode that suppresses every interactive
 # prompt; combined with DOMAINS/IPVS/ENABLE_*/REPEATS/PARALLEL/SCANLEVEL
 # vars, the whole flow is fully non-interactive (no stdin piping needed).
+#
+# We also set DOMAINS_DEFAULT to the user's domain. blockcheck2 has a
+# hard-coded `DOMAINS_DEFAULT=rutracker.org` and falls back to it if
+# DOMAINS is empty for any reason. Keeping the default in sync with the
+# requested domain means the user can never silently get rutracker
+# results when they asked for something else.
 cd "${ZAPRET_DIR}"
 env \
     BATCH=1 \
     IFACE_WAN="${WAN_DEV}" \
     DOMAINS="${DOMAIN}" \
+    DOMAINS_DEFAULT="${DOMAIN}" \
     IPVS=4 \
     ENABLE_HTTP=1 \
     ENABLE_HTTPS_TLS12=1 \

@@ -18,15 +18,23 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "=== DNS Resolution ==="
-# +tries + +time bounded so a poisoned/blackholed DNS doesn't hang us.
-DNS_RESULT=$(dig +short +time=2 +tries=2 "${DOMAIN}" 2>&1)
+# Use `drill` (FreeBSD base) — `dig` is only present if bind-tools port
+# is installed, which OPNsense doesn't ship by default.
+DNS_RESULT=$(drill "${DOMAIN}" A 2>/dev/null | awk '
+    /^;; ANSWER SECTION/ {in_ans=1; next}
+    /^;;/ {in_ans=0}
+    in_ans && $4=="A" {print $5}
+')
 [ -z "${DNS_RESULT}" ] && DNS_RESULT="(no answer — DNS may be blocked)"
 echo "${DNS_RESULT}"
 
 echo ""
 echo "=== HTTPS Connection Test ==="
+# %{ssl_version} is not exposed by FreeBSD's curl build, so we omit it.
+# %{ssl_verify_result} is available and tells us whether the TLS chain
+# validated (0 == OK, 20 == "unable to get local issuer cert" w/ -k, etc.)
 curl -4 -sk --connect-timeout 5 --max-time 10 -o /dev/null \
-    -w "HTTP Status: %{http_code}\nRemote IP: %{remote_ip}\nTLS Version: %{ssl_version}\nTime Connect: %{time_connect}s\nTime TLS: %{time_appconnect}s\nTime Total: %{time_total}s\n" \
+    -w "HTTP Status: %{http_code}\nRemote IP: %{remote_ip}\nTLS Verify: %{ssl_verify_result}\nTime Connect: %{time_connect}s\nTime TLS: %{time_appconnect}s\nTime Total: %{time_total}s\n" \
     "https://${DOMAIN}/" 2>&1
 
 RESULT=$?

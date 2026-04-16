@@ -1,6 +1,6 @@
 PLUGIN_NAME=        zapret2
 PLUGIN_VERSION=     1.6.5
-PLUGIN_REVISION=    0
+PLUGIN_REVISION=    1
 PLUGIN_COMMENT=     DPI bypass using zapret2 (anti-censorship)
 PLUGIN_MAINTAINER=  mail@ugorur.com
 # luajit, jq, git-lite, pkgconf are installed by setup.sh from FreeBSD's
