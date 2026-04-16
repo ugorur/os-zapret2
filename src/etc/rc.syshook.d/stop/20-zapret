@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Stop zapret2 cleanly on shutdown/reboot so dvtws2 is killed and
+# ipfw divert rules are removed before the box goes down.
+
+/usr/local/sbin/configctl zapret stop

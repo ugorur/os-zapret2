@@ -26,51 +26,59 @@ Many ISPs use DPI to inspect TLS ClientHello packets and block websites based on
 
 ## Installation
 
-### Method 1: Install from Release
+Releases ship as a proper FreeBSD `.pkg`. Install it with `pkg add` — OPNsense
+will then register it natively: you'll see it under **Firmware → Plugins**
+(as `os-zapret2`) and **System → Services** (as `zapret2 DPI Bypass`), and it
+will auto-start on every reboot while **Enabled** is checked.
+
+### Install from Release
 
 ```sh
-# On the OPNsense firewall (via SSH)
+# On the OPNsense firewall (via SSH, as root)
 
-# Download the latest release
-fetch -o /tmp/os-zapret2.pkg https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.0.0.pkg
+fetch -o /tmp/os-zapret2.pkg \
+    https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.0.pkg
 
-# Extract to OPNsense directories
-cd /tmp && tar -xJf os-zapret2.pkg -C /usr/local
+pkg add /tmp/os-zapret2.pkg
 
-# Set permissions
-chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/*.sh
-chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/rc.d/zapret
-
-# Download and compile zapret2
+# Compile the dvtws2 binary (one-time, ~1 min)
 /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
-
-# Restart configd to register the plugin
-service configd restart
 ```
 
-Then navigate to **Services > Zapret DPI Bypass** in the GUI.
+Then open **Services → Zapret DPI Bypass** in the GUI and configure it.
 
-### Method 2: Install from Source
+Verify the plugin is registered:
 
 ```sh
-# On the OPNsense firewall (via SSH)
-cd /tmp
+pkg info os-zapret2
+# shows name, version, origin, install date
+```
+
+### Uninstall
+
+```sh
+pkg delete os-zapret2
+```
+
+The `+PRE_DEINSTALL` hook stops dvtws2 and clears ipfw divert rules before
+files are removed. Saved settings in `config.xml` are preserved — reinstalling
+will pick them up again.
+
+### Build from Source
+
+You need a FreeBSD host (or a FreeBSD VM — GitHub Actions uses
+`vmactions/freebsd-vm`) because `pkg-static create` is FreeBSD-only.
+
+```sh
+# On a FreeBSD 14 host, with jq installed
 git clone https://github.com/ugorur/os-zapret2.git
 cd os-zapret2
-
-# Copy plugin files to OPNsense
-cp -r src/opnsense/* /usr/local/opnsense/
-
-# Set permissions
-chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/*.sh
-chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/rc.d/zapret
-
-# Download and compile zapret2
-/usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
-
-# Restart configd to register the plugin
-service configd restart
+pkg install -y jq
+sh scripts/build-pkg.sh
+# Output: dist/os-zapret2-<version>.pkg
 ```
+
+Then copy the `.pkg` to the firewall and `pkg add` it as above.
 
 ## Quick Start
 

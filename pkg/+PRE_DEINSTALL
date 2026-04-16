@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Pre-deinstall hook for os-zapret2.
+# Stops dvtws2 and removes ipfw divert rules BEFORE pkg removes the
+# scripts that know how to do that. Runs on both uninstall and upgrade
+# (pkg runs PRE_DEINSTALL of the old version before POST_INSTALL of the new).
+
+if [ -x /usr/local/opnsense/scripts/OPNsense/Zapret/zapret_service.sh ]; then
+    /usr/local/opnsense/scripts/OPNsense/Zapret/zapret_service.sh stop >/dev/null 2>&1 || true
+fi
+
+exit 0

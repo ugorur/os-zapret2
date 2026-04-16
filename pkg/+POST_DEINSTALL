@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Post-deinstall hook for os-zapret2.
+# Reloads configd after the plugin's files are gone so stale action
+# definitions are dropped from the running configd.
+
+if [ -x /usr/local/etc/rc.d/configd ]; then
+    /usr/local/etc/rc.d/configd restart >/dev/null 2>&1 || true
+fi
+
+exit 0

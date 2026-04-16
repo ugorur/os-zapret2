@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Auto-start zapret2 at boot if enabled in config.xml.
+# The [start] action in actions_zapret.conf invokes zapret_service.sh,
+# which respects the ZAPRET_ENABLED flag and exits cleanly when disabled.
+
+/usr/local/sbin/configctl zapret start

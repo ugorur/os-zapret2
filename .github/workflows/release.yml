@@ -18,11 +18,19 @@ jobs:
       - name: Validate XML files
         run: find src -name "*.xml" -exec xmllint --noout {} \;
 
-      - name: Lint PHP files
-        run: find src -name "*.php" -exec php -l {} \;
+      - name: Lint PHP files (docker)
+        run: |
+          docker run --rm -v "${PWD}":/app -w /app php:8.2-cli sh -c '
+            set -e
+            find src -name "*.php" -exec php -l {} \;
+            find src -name "*.inc" -exec php -l {} \;
+          '
 
       - name: Validate shell scripts
-        run: find src -name "*.sh" -exec sh -n {} \;
+        run: |
+          find src -name "*.sh" -exec sh -n {} \;
+          find pkg -type f -exec sh -n {} \;
+          find scripts -name "*.sh" -exec sh -n {} \;
 
   release:
     name: Build & Release
@@ -38,58 +46,56 @@ jobs:
           echo "tag_version=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Release version: ${TAG}"
 
-      - name: Build package
+      - name: Build .pkg inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          prepare: |
+            pkg install -y jq
+          run: |
+            sh scripts/build-pkg.sh
+
+      - name: Stage built package for release upload
         run: |
-          PKG_NAME="os-zapret2-${{ steps.version.outputs.tag_version }}"
-
-          mkdir -p staging/usr/local
-          cp -r src/opnsense staging/usr/local/opnsense
-
-          find staging -name "*.sh" -exec chmod +x {} \;
-          find staging -name "zapret" -path "*/rc.d/*" -exec chmod +x {} \;
-
-          cd staging
-          tar -cJf "../${PKG_NAME}.pkg" .
-          cd ..
-
-          ls -lh "${PKG_NAME}.pkg"
+          ls -lh dist/
+          # Move to repo root so softprops/action-gh-release picks it up
+          mv dist/*.pkg .
+          ls -lh *.pkg
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Get commits since last tag
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
             CHANGES=$(git log --pretty=format:"- %s" "${PREV_TAG}..HEAD" | grep -v "Co-Authored-By")
           else
             CHANGES=$(git log --pretty=format:"- %s" | grep -v "Co-Authored-By")
           fi
-          # Write to file for the release body
           cat > /tmp/changelog.md << 'HEADER'
           ## Installation
 
-          ### Quick Install (SSH)
+          Install from SSH on the OPNsense firewall:
+
           ```sh
-          # Download and extract
           fetch -o /tmp/os-zapret2.pkg https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-${{ steps.version.outputs.tag_version }}.pkg
-          cd /tmp && tar -xJf os-zapret2.pkg -C /usr/local
+          pkg add /tmp/os-zapret2.pkg
 
-          # Set permissions
-          chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/*.sh
-          chmod +x /usr/local/opnsense/scripts/OPNsense/Zapret/rc.d/zapret
-
-          # Download and compile zapret2
+          # Download and compile the dvtws2 binary
           /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
-
-          # Restart configd to register the plugin
-          service configd restart
           ```
 
-          Then navigate to **Services > Zapret DPI Bypass** in the OPNsense GUI.
+          The plugin will then appear under **Firmware > Plugins** (as `os-zapret2`)
+          and **System > Services** (as `zapret2 DPI Bypass`). Configure it via
+          **Services > Zapret DPI Bypass** in the GUI. It will auto-start on
+          every reboot while "Enabled" is checked.
+
+          To uninstall: `pkg delete os-zapret2`
 
           ### Requirements
           - OPNsense 26.1+ (FreeBSD 14.x)
-          - `luajit` and `git` packages (installed automatically by setup.sh)
+          - `luajit` package (declared as a pkg dependency, installed automatically)
+          - `git` (required by setup.sh to fetch and compile zapret2 sources)
 
           HEADER
 
