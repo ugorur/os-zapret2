@@ -71,10 +71,14 @@
             $("#blockcheckWinning").html('');
             $("#blockcheckRaw").text('');
 
-            ajaxCall('/api/zapret/diagnostics/blockcheck', {'domain': domain}, function(data, status) {
+            // Bypass OPNsense's ajaxCall (which has a short default timeout)
+            // and call $.ajax directly with a 10-minute timeout — blockcheck2
+            // takes 1–3 minutes for a standard scan and we'd rather wait than
+            // give the user the misleading "Unstructured output" fallback.
+            var doneFn = function(data, status) {
                 $("#blockcheckBtn_progress").removeClass("fa fa-spinner fa-pulse");
 
-                if (data.status !== 'ok') {
+                if (!data || data.status !== 'ok') {
                     $("#blockcheckSummary").html('<span class="text-danger">' +
                         $('<div>').text("Error: " + (data.message || 'Unknown error')).html() + '</span>');
                     return;
@@ -116,6 +120,26 @@
 
                 // Full summary in raw box
                 $("#blockcheckRaw").text(bc.summary || '');
+            };
+
+            var errFn = function(jqXHR, textStatus, errorThrown) {
+                $("#blockcheckBtn_progress").removeClass("fa fa-spinner fa-pulse");
+                var msg = (textStatus === 'timeout')
+                    ? 'Blockcheck took longer than 10 minutes and was cancelled. Try a single domain at a time or a faster ISP.'
+                    : 'Request failed: ' + textStatus;
+                $("#blockcheckSummary").html('<span class="text-danger">' +
+                    $('<div>').text(msg).html() + '</span>');
+            };
+
+            // Form-encoded POST so OPNsense's ApiControllerBase->getPost() works.
+            $.ajax({
+                type: 'POST',
+                url: '/api/zapret/diagnostics/blockcheck',
+                data: {'domain': domain},
+                dataType: 'json',
+                timeout: 600000,   // 10 minutes — match the configd action's timeout
+                success: doneFn,
+                error: errFn
             });
         });
     });
