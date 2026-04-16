@@ -87,23 +87,24 @@ start_service() {
 
     # Enable ipfw enforcement at the kernel level. The module being loaded
     # is not enough — net.inet.ip.fw.enable must also be 1, otherwise our
-    # divert rules sit in the table but match zero packets.
-    # Both v4 and v6 enabled together so consistent with FreeBSD defaults.
+    # divert rules sit in the table but match zero packets. This was the
+    # root cause of "bypass stopped working after reboot" — on default
+    # OPNsense the sysctl is 0 and nothing turns it on for us.
+    # Both v4 and v6 enabled to match FreeBSD's default chain registration.
     sysctl net.inet.ip.fw.enable=1  >/dev/null 2>&1
     sysctl net.inet6.ip6.fw.enable=1 >/dev/null 2>&1
 
-    # CRITICAL: bounce pf to put ipfw back in the pfil chain.
-    # On modern OPNsense/pfsense (FreeBSD 14+), after ipfw is enabled,
-    # pf's pfil hooks own the filter chain and divert reinjection loses
-    # its `diverted` mbuf flag during the next stack traversal. The result
-    # is an infinite loop: every reinjected packet matches the divert rule
-    # again and is sent back to dvtws2 — kernel buffers fill up, fetch
-    # times out, internet effectively breaks.
-    # The fix (also documented in upstream zapret2's pfsense init script)
-    # is to disable+re-enable pf, which re-registers the pfil hooks in an
-    # order that preserves the divert flag across reinjection.
-    pfctl -d >/dev/null 2>&1 || true
-    pfctl -e >/dev/null 2>&1 || true
+    # NOTE: do NOT call `pfctl -d ; pfctl -e` here, do NOT call
+    # /usr/local/opnsense/scripts/shaper/sync_fw_hooks.py. Both alter the
+    # pfil chain order so that ipfw runs *before* pf on outbound (pre-NAT
+    # divert). On real hardware that turns reinjected packets into an
+    # infinite loop because the lua-marked sockarg gets stripped by the
+    # netgraph PPPoE encap. The natural chain order (pf-then-ipfw on out,
+    # which is what you get from just sysctl-enabling ipfw) keeps divert
+    # post-NAT and lua's sockarg marker is preserved across reinjection,
+    # so `not sockarg` properly breaks the loop. Verified empirically on
+    # the live box: with lua scripts + `not sockarg`, counter caps at the
+    # actual packet count (no runaway).
 
     # Safety: ensure default policy is accept (FreeBSD with
     # IPFIREWALL_DEFAULT_TO_ACCEPT, which OPNsense uses, satisfies this).
@@ -173,18 +174,21 @@ start_service() {
     remove_divert_rules
 
     # Outbound divert rules — one per port.
-    # `not diverted` excludes packets coming back from the divert socket
-    # (dvtws2's reinjections), preventing the loop.
-    # `not sockarg` excludes the fake/probe packets dvtws2 sometimes
-    # generates from a raw socket (marked with SO_USER_COOKIE=0x200).
+    # `not sockarg` excludes packets dvtws2 has already touched (its lua
+    # scripts mark reinjections with SO_USER_COOKIE=0x200), so reinjected
+    # traffic skips the divert and continues out — this is what breaks
+    # what would otherwise be an infinite re-divert loop.
     # `xmit ${wan_dev}` scopes to outbound on the WAN device only — LAN
     # traffic and traffic on other interfaces is left alone.
+    # NOTE: do NOT add `not diverted`. On FreeBSD's PPPoE setup the
+    # `diverted` mbuf flag is stripped during netgraph encap on egress, so
+    # `not diverted` matches nothing useful and just adds rule overhead.
     local rulenum=${RULE_BASE}
     local IFS_OLD="${IFS}"
     IFS=","
     for port in ${PORTS}; do
         ipfw -qf add ${rulenum} divert ${DIVERT_PORT} \
-            tcp from any to any ${port} out not diverted not sockarg xmit ${wan_dev}
+            tcp from any to any ${port} out not sockarg xmit ${wan_dev}
         rulenum=$((rulenum + 1))
     done
     IFS="${IFS_OLD}"
