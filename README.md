@@ -73,7 +73,7 @@ sh scripts/build-pkg.sh
 
 ## Quick start
 
-1. **Services → Zapret DPI Bypass → Diagnostics → Blockcheck.** Enter a domain that's blocked on your ISP (e.g., `rutracker.org`, `rutracker.org`, whatever you can't reach). Click **Run**. Wait 1–3 minutes — the plugin runs upstream's `blockcheck2` against ~50 strategies and reports the winning ones.
+1. **Services → Zapret DPI Bypass → Diagnostics → Blockcheck.** Enter a domain that's blocked on your ISP (e.g., `rutracker.org`, or any site you can't reach). Click **Run**. Wait 1–3 minutes — the plugin runs upstream's `blockcheck2` against ~50 strategies and reports the winning ones.
 2. Copy the strategy with a working result.
 3. **Services → Zapret DPI Bypass → Settings.** Tick **Enable**, pick your **WAN Interface** from the dropdown, paste the winning strategy into **HTTPS Strategy**, click **Save & Apply**.
 4. Test the same blocked domain from a LAN device — should now load.

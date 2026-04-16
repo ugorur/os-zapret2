@@ -54,9 +54,17 @@ if [ -x /usr/local/bin/jq ]; then
 fi
 [ -z "${WAN_DEV}" ] && WAN_DEV="${WAN_IF}"
 
+# blockcheck2 refuses to run reliably while another DPI bypass is active.
+# Stop zapret if it's running — we'll restart it on exit if it was.
+WAS_RUNNING=0
+if [ -f /var/run/dvtws2.pid ] && kill -0 "$(cat /var/run/dvtws2.pid)" 2>/dev/null; then
+    WAS_RUNNING=1
+    /usr/local/sbin/configctl zapret stop >/dev/null 2>&1
+    sleep 2
+fi
+
 # blockcheck2 wants ipfw enabled to install its own divert rules. Save the
-# previous state so we can restore after — we don't want to leave the user's
-# kernel state changed.
+# previous state so we can restore after.
 PREV_IPFW=$(/sbin/sysctl -n net.inet.ip.fw.enable 2>/dev/null || echo 0)
 PREV_IPFW6=$(/sbin/sysctl -n net.inet6.ip6.fw.enable 2>/dev/null || echo 0)
 /sbin/kldstat -q -m ipdivert || /sbin/kldload ipdivert
@@ -66,32 +74,35 @@ PREV_IPFW6=$(/sbin/sysctl -n net.inet6.ip6.fw.enable 2>/dev/null || echo 0)
 
 LOG=$(mktemp /tmp/zapret-blockcheck.XXXXXX) || {
     emit_error "could not create temp log"
+    [ "${WAS_RUNNING}" = "1" ] && /usr/local/sbin/configctl zapret start >/dev/null 2>&1
     exit 1
 }
 
-# Feed answers to blockcheck2's prompts:
-#   "press enter to continue"  → blank line
-#   "select test : 1/2"        → 2 (standard)
-#   "specify domain(s)"        → ${DOMAIN}
-#   "ip protocol version(s)"   → 4 (IPv4 only)
-#   "check http (Y/N)"         → Y
-#   "check https tls 1.2"      → Y
-#   "check https tls 1.3"      → Y
-#   "check http3 QUIC"         → N (skip — UDP, less relevant for SNI)
-#   "REPEATS"                  → 1
-#   "enable parallel scan"     → N
-# Trailing blank lines absorb any further "(Y/N) ?" follow-up prompts that
-# accept defaults.
-INPUT=$(printf '\n2\n%s\n4\nY\nY\nY\nN\n1\nN\n\n\n\n\n\n\n\n\n\n\n' "${DOMAIN}")
-
+# blockcheck2 has a BATCH=1 env mode that suppresses every interactive
+# prompt; combined with DOMAINS/IPVS/ENABLE_*/REPEATS/PARALLEL/SCANLEVEL
+# vars, the whole flow is fully non-interactive (no stdin piping needed).
 cd "${ZAPRET_DIR}"
-echo "${INPUT}" | env IFACE_WAN="${WAN_DEV}" /usr/bin/timeout ${TIMEOUT} \
-    /bin/sh "${BLOCKCHECK}" >"${LOG}" 2>&1
+env \
+    BATCH=1 \
+    IFACE_WAN="${WAN_DEV}" \
+    DOMAINS="${DOMAIN}" \
+    IPVS=4 \
+    ENABLE_HTTP=1 \
+    ENABLE_HTTPS_TLS12=1 \
+    ENABLE_HTTPS_TLS13=1 \
+    ENABLE_HTTP3=0 \
+    REPEATS=1 \
+    PARALLEL=0 \
+    SCANLEVEL=standard \
+    /usr/bin/timeout ${TIMEOUT} /bin/sh "${BLOCKCHECK}" >"${LOG}" 2>&1
 EXIT=$?
 
-# Restore ipfw enable state (don't leave the kernel changed)
+# Restore ipfw enable state
 /sbin/sysctl net.inet.ip.fw.enable=${PREV_IPFW}   >/dev/null 2>&1
 /sbin/sysctl net.inet6.ip6.fw.enable=${PREV_IPFW6} >/dev/null 2>&1
+
+# Restart zapret if it was running when we started
+[ "${WAS_RUNNING}" = "1" ] && /usr/local/sbin/configctl zapret start >/dev/null 2>&1
 
 # Parse SUMMARY section. blockcheck2 prints:
 #   summary
