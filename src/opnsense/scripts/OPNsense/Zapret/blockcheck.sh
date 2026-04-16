@@ -30,19 +30,19 @@ emit_error() {
 # Argument validation
 if [ -z "${DOMAIN}" ]; then
     emit_error "no domain specified"
-    exit 1
+    exit 0
 fi
 if ! echo "${DOMAIN}" | grep -qE '^[a-zA-Z0-9][a-zA-Z0-9.\-]+[a-zA-Z]{2,}$'; then
     emit_error "invalid domain format"
-    exit 1
+    exit 0
 fi
 if [ ! -x "${BLOCKCHECK}" ]; then
     emit_error "blockcheck2.sh not found — run setup.sh first"
-    exit 1
+    exit 0
 fi
 if [ ! -f "${CONFIG}" ]; then
     emit_error "zapret config not found — save plugin settings first"
-    exit 1
+    exit 0
 fi
 
 # Resolve WAN device from plugin config
@@ -75,7 +75,7 @@ PREV_IPFW6=$(/sbin/sysctl -n net.inet6.ip6.fw.enable 2>/dev/null || echo 0)
 LOG=$(mktemp /tmp/zapret-blockcheck.XXXXXX) || {
     emit_error "could not create temp log"
     [ "${WAS_RUNNING}" = "1" ] && /usr/local/sbin/configctl zapret start >/dev/null 2>&1
-    exit 1
+    exit 0
 }
 
 # blockcheck2 has a BATCH=1 env mode that suppresses every interactive
@@ -104,24 +104,26 @@ EXIT=$?
 # Restart zapret if it was running when we started
 [ "${WAS_RUNNING}" = "1" ] && /usr/local/sbin/configctl zapret start >/dev/null 2>&1
 
-# Parse SUMMARY section. blockcheck2 prints:
-#   summary
-#   -------
-#   <strategy 1> : <result>
-#   <strategy 2> : <result>
-#   <strategy ...>
-SUMMARY=$(awk '/^summary$/,0' "${LOG}" 2>/dev/null)
+# Parse SUMMARY section. blockcheck2's heading is `* SUMMARY` (upper,
+# asterisk-prefixed). Grab from there to end-of-file.
+SUMMARY=$(awk '/^\* SUMMARY/,0' "${LOG}" 2>/dev/null)
 if [ -z "${SUMMARY}" ]; then
     /usr/local/bin/jq -nc \
         --arg msg "blockcheck did not produce a summary (exit=${EXIT})" \
         --rawfile log "${LOG}" \
         '{status:"error", message:$msg, log:$log[-2000:]}'
     rm -f "${LOG}"
-    exit 1
+    exit 0   # exit 0 even on our own errors so configd returns stdout
+            # verbatim (non-zero exit makes configd discard stdout and
+            # return "Execute error" to the API).
 fi
 
-# Extract winning strategies — lines containing "OK" or "ipv4: ok".
-WINNING=$(echo "${SUMMARY}" | grep -iE 'ok|works' | head -20)
+# Extract useful lines from the summary. blockcheck2 produces:
+#   "working without bypass"  → site was never blocked; no strategy needed
+#   "<strategy> : works"      → a strategy that defeated the DPI
+#   "curl_test_* : ok"        → specific test that passed
+# Anything else is noise.
+WINNING=$(echo "${SUMMARY}" | grep -iE 'works|^[^ ]+ : ok|without bypass' | head -30)
 
 /usr/local/bin/jq -nc \
     --arg domain "${DOMAIN}" \
