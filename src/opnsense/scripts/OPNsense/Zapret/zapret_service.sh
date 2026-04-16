@@ -174,21 +174,22 @@ start_service() {
     remove_divert_rules
 
     # Outbound divert rules — one per port.
-    # `not sockarg` excludes packets dvtws2 has already touched (its lua
-    # scripts mark reinjections with SO_USER_COOKIE=0x200), so reinjected
-    # traffic skips the divert and continues out — this is what breaks
-    # what would otherwise be an infinite re-divert loop.
+    # Two complementary loop-prevention guards:
+    #   `not diverted` — excludes packets the kernel has marked as coming
+    #     back from the divert socket. Works on virtio/Ethernet WANs.
+    #   `not sockarg`  — excludes packets dvtws2's lua scripts have marked
+    #     with SO_USER_COOKIE=0x200. Works on PPPoE WANs where netgraph
+    #     encap strips the `diverted` flag but preserves SO_USER_COOKIE.
+    # Together they prevent the infinite re-divert loop on both topologies
+    # we've tested (Proxmox/virtio test bench AND bare-metal+PPPoE live).
     # `xmit ${wan_dev}` scopes to outbound on the WAN device only — LAN
     # traffic and traffic on other interfaces is left alone.
-    # NOTE: do NOT add `not diverted`. On FreeBSD's PPPoE setup the
-    # `diverted` mbuf flag is stripped during netgraph encap on egress, so
-    # `not diverted` matches nothing useful and just adds rule overhead.
     local rulenum=${RULE_BASE}
     local IFS_OLD="${IFS}"
     IFS=","
     for port in ${PORTS}; do
         ipfw -qf add ${rulenum} divert ${DIVERT_PORT} \
-            tcp from any to any ${port} out not sockarg xmit ${wan_dev}
+            tcp from any to any ${port} out not diverted not sockarg xmit ${wan_dev}
         rulenum=$((rulenum + 1))
     done
     IFS="${IFS_OLD}"
