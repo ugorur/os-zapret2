@@ -11,9 +11,24 @@ set -e
 echo "=== zapret2 setup ==="
 
 # Install build + runtime dependencies if missing.
-# These come from FreeBSD's main pkg repo (not OPNsense's), which on a
-# fresh OPNsense is enabled but the catalogue may not be primed yet.
-pkg update -q
+# These come from FreeBSD's main pkg repo (not OPNsense's). OPNsense ships
+# with that repo *disabled* by default via an override at
+# /usr/local/etc/pkg/repos/FreeBSD.conf containing { enabled: no }. We
+# enable it here for the duration of the install if it's currently off.
+FREEBSD_REPO_OVERRIDE=/usr/local/etc/pkg/repos/FreeBSD.conf
+ENABLED_FREEBSD_REPO=0
+if [ -f "${FREEBSD_REPO_OVERRIDE}" ] && grep -q 'enabled: no' "${FREEBSD_REPO_OVERRIDE}"; then
+    echo "Temporarily enabling FreeBSD pkg repo to fetch luajit/jq/git-lite/pkgconf..."
+    cp "${FREEBSD_REPO_OVERRIDE}" "${FREEBSD_REPO_OVERRIDE}.bak"
+    cat > "${FREEBSD_REPO_OVERRIDE}" <<'EOF'
+FreeBSD: { enabled: yes }
+FreeBSD-kmods: { enabled: yes }
+EOF
+    ENABLED_FREEBSD_REPO=1
+fi
+
+# Refresh package catalogues (fast no-op if already up to date)
+pkg update -q -f
 
 pkg info -q pkgconf  || pkg install -y pkgconf
 pkg info -q luajit   || pkg install -y luajit
@@ -22,6 +37,12 @@ pkg info -q git-lite || pkg install -y git-lite
 # jq is required at runtime by zapret_service.sh to parse pluginctl JSON
 # when resolving the WAN interface name.
 pkg info -q jq       || pkg install -y jq
+
+# Restore the original repo state if we changed it. The packages we just
+# installed remain — pkg upgrades can be controlled separately.
+if [ "${ENABLED_FREEBSD_REPO}" = "1" ] && [ -f "${FREEBSD_REPO_OVERRIDE}.bak" ]; then
+    mv "${FREEBSD_REPO_OVERRIDE}.bak" "${FREEBSD_REPO_OVERRIDE}"
+fi
 
 # Clone or update zapret2
 if [ -d "${ZAPRET_DIR}/.git" ]; then
