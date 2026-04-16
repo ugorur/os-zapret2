@@ -93,9 +93,34 @@
                     return;
                 }
 
+                // Format duration as "Xm Ys" — handier than raw seconds when
+                // a run takes 10+ minutes.
+                var fmtDuration = function(s) {
+                    if (typeof s !== 'number' || isNaN(s)) return '';
+                    if (s < 60) return s + 's';
+                    var m = Math.floor(s / 60);
+                    var rem = s % 60;
+                    return m + 'm ' + rem + 's';
+                };
+                var timingHtml = '';
+                if (bc.duration_seconds !== undefined) {
+                    timingHtml = ' <small class="text-muted">(took ' +
+                        fmtDuration(bc.duration_seconds) + ')</small>';
+                }
+
+                // Persistent log path — surface it on every result so the
+                // user can ssh in and `cat`/`grep` the full output, which is
+                // far more than the 2000-byte log slice we embed in JSON.
+                var logFileHtml = '';
+                if (bc.log_file) {
+                    logFileHtml = '<br><small class="text-muted">Full log: <code>' +
+                        $('<div>').text(bc.log_file).html() + '</code></small>';
+                }
+
                 if (bc.status === 'error') {
                     $("#blockcheckSummary").html('<span class="text-danger">' +
-                        $('<div>').text("Blockcheck error: " + bc.message).html() + '</span>');
+                        $('<div>').text("Blockcheck error: " + bc.message).html() +
+                        '</span>' + timingHtml + logFileHtml);
                     if (bc.log) $("#blockcheckRaw").text(bc.log);
                     return;
                 }
@@ -115,7 +140,7 @@
                 if (allBaseline) {
                     $("#blockcheckSummary").html(
                         '<span class="text-success"><strong>' + domEsc + '</strong> reaches its server fine from this firewall ' +
-                        'without any DPI bypass.</span><br>' +
+                        'without any DPI bypass.</span>' + timingHtml + '<br>' +
                         'This means either (a) your ISP does not block this domain, or (b) your firewall\'s DNS resolver ' +
                         '(e.g. AdGuard, Unbound DoH) is already bypassing a DNS-based block. ' +
                         'If LAN clients still cannot reach it, the issue is on the client side — usually because clients ' +
@@ -123,8 +148,19 @@
                         'layer to find a useful strategy.'
                     );
                 } else {
+                    var partialHtml = '';
+                    if (bc.partial) {
+                        partialHtml = ' <span class="label label-warning">partial</span>' +
+                            '<br><small class="text-muted">Blockcheck did not finish (it usually takes longer than the wrapper\'s ' +
+                            'timeout for heavily-blocked domains). The strategies below are the per-protocol winners that ' +
+                            'blockcheck2 confirmed inline before being killed — they\'re the same picks the full SUMMARY would have ' +
+                            'shown for the protocols it managed to test. To get a complete result, set ' +
+                            '<code>BLOCKCHECK_TIMEOUT=2700</code> and re-run via SSH.</small>';
+                    }
                     $("#blockcheckSummary").html('Tested <strong>' + domEsc +
-                        '</strong>. Strategies that worked are listed below — copy one into the HTTPS Strategy field on the Settings page.');
+                        '</strong>' + timingHtml + partialHtml +
+                        '. Strategies that worked are listed below — copy one into the HTTPS Strategy field on the Settings page.' +
+                        logFileHtml);
                 }
 
                 // List winning strategies
