@@ -75,12 +75,29 @@ POST_INSTALL_JSON=$(jq -Rs . < pkg/+POST_INSTALL)
 PRE_DEINSTALL_JSON=$(jq -Rs . < pkg/+PRE_DEINSTALL)
 POST_DEINSTALL_JSON=$(jq -Rs . < pkg/+POST_DEINSTALL)
 
-# Dependency list
-if [ "${PLUGIN_DEPENDS}" = "luajit" ]; then
-    DEPS='{"luajit": {"origin": "lang/luajit", "version": "0"}}'
-else
-    DEPS='{}'
-fi
+# Dependency list — PLUGIN_DEPENDS is space-separated. Each entry is
+# mapped to its FreeBSD ports origin and emitted as a JSON object that
+# pkg-static can resolve at install time.
+dep_origin() {
+    case "$1" in
+        luajit) echo "lang/luajit" ;;
+        jq)     echo "textproc/jq" ;;
+        git)    echo "devel/git" ;;
+        *)      echo "$1" ;;  # best-effort; pkg will fail loudly if wrong
+    esac
+}
+
+DEPS_ENTRIES=""
+for dep in ${PLUGIN_DEPENDS}; do
+    [ -z "${dep}" ] && continue
+    origin=$(dep_origin "${dep}")
+    if [ -n "${DEPS_ENTRIES}" ]; then
+        DEPS_ENTRIES="${DEPS_ENTRIES},"
+    fi
+    DEPS_ENTRIES="${DEPS_ENTRIES}\"${dep}\":{\"origin\":\"${origin}\",\"version\":\"0\"}"
+done
+DEPS="{${DEPS_ENTRIES}}"
+echo "==> deps: ${DEPS}"
 
 MANIFEST="${REPO_ROOT}/work/+MANIFEST"
 jq -n \

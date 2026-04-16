@@ -27,20 +27,29 @@ load_config() {
 resolve_interface() {
     local iface="$1"
 
-    # Try direct match first (e.g., pppoe2, igc0)
+    # Direct match first (raw device names like pppoe2, igc0)
     if ifconfig "${iface}" > /dev/null 2>&1; then
         echo "${iface}"
         return
     fi
 
-    # Try resolving OPNsense interface name via pluginctl
-    local dev=$(/usr/local/sbin/pluginctl -4 "${iface}" 2>/dev/null | head -1)
+    # Map an OPNsense logical interface (opt11, wan, lan, …) to its kernel
+    # device. pluginctl -4 emits JSON like:
+    #   {"opt11":[{"address":"...","device":"pppoe2", ...}]}
+    # so we extract the .device field with jq. (jq is a declared pkg dep.)
+    local dev=""
+    if [ -x /usr/local/bin/jq ]; then
+        dev=$(/usr/local/sbin/pluginctl -4 "${iface}" 2>/dev/null \
+            | /usr/local/bin/jq -r --arg if "${iface}" '.[$if][0].device // empty')
+    fi
     if [ -n "${dev}" ]; then
         echo "${dev}"
         return
     fi
 
-    # Fallback: use the value as-is
+    # Last resort: hand the original string back to the caller. ipfw will
+    # reject an invalid device, which is preferable to silently constructing
+    # a malformed rule.
     echo "${iface}"
 }
 
