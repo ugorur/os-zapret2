@@ -7,6 +7,9 @@ ZAPRET_DIR="/usr/local/etc/zapret2"
 CONFIG="${ZAPRET_DIR}/zapret.conf"
 PIDFILE="/var/run/dvtws2.pid"
 SUPERVISOR_PIDFILE="/var/run/dvtws2-supervisor.pid"
+WATCHDOG_PIDFILE="/var/run/zapret-watchdog.pid"
+WATCHDOG_SUPERVISOR_PIDFILE="/var/run/zapret-watchdog-supervisor.pid"
+WATCHDOG_LOOP="/usr/local/opnsense/scripts/OPNsense/Zapret/watchdog_loop.sh"
 DVTWS_BIN="${ZAPRET_DIR}/binaries/my/dvtws2"
 HOSTLIST="${ZAPRET_DIR}/hostlist.txt"
 HOSTLIST_EXCLUDE="${ZAPRET_DIR}/hostlist-exclude.txt"
@@ -194,6 +197,20 @@ start_service() {
     done
     IFS="${IFS_OLD}"
 
+    # Start the safety watchdog under daemon(8) too. It probes a control URL
+    # every minute and stops the service if 3 consecutive checks fail —
+    # so a misconfigured strategy that breaks general HTTPS auto-recovers
+    # within ~3 minutes instead of leaving the household offline.
+    if [ -x "${WATCHDOG_LOOP}" ]; then
+        /usr/sbin/daemon \
+            -P "${WATCHDOG_SUPERVISOR_PIDFILE}" \
+            -p "${WATCHDOG_PIDFILE}" \
+            -r -R 5 \
+            -t zapret-watchdog \
+            -f \
+            "${WATCHDOG_LOOP}"
+    fi
+
     echo "zapret is running as pid $(cat ${PIDFILE}) (supervisor pid $(cat ${SUPERVISOR_PIDFILE}))"
 }
 
@@ -201,6 +218,17 @@ stop_service() {
     # Remove divert rules FIRST so the gap between supervisor-kill and
     # daemon respawn doesn't drop traffic.
     remove_divert_rules
+
+    # Kill the watchdog FIRST (before its supervisor can respawn it)
+    if [ -f "${WATCHDOG_SUPERVISOR_PIDFILE}" ]; then
+        kill "$(cat ${WATCHDOG_SUPERVISOR_PIDFILE})" 2>/dev/null
+        rm -f "${WATCHDOG_SUPERVISOR_PIDFILE}"
+    fi
+    if [ -f "${WATCHDOG_PIDFILE}" ]; then
+        kill "$(cat ${WATCHDOG_PIDFILE})" 2>/dev/null
+        rm -f "${WATCHDOG_PIDFILE}"
+    fi
+    rm -f /var/run/zapret-watchdog.state
 
     # Kill the supervisor so daemon -r doesn't respawn dvtws2
     if [ -f "${SUPERVISOR_PIDFILE}" ]; then
