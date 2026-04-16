@@ -25,8 +25,13 @@
 #}
 
 <script>
+    // Try to parse a string as JSON, return null on failure.
+    function tryJSON(s) {
+        try { return JSON.parse(s); } catch (e) { return null; }
+    }
+
     $(document).ready(function() {
-        // Test Domain
+        // ---- Test Domain Connectivity ----
         $("#testDomainBtn").click(function() {
             var domain = $("#testDomainInput").val().trim();
             if (!domain) {
@@ -49,26 +54,68 @@
             });
         });
 
-        // Blockcheck
+        // ---- Blockcheck (Strategy Finder) ----
         $("#blockcheckBtn").click(function() {
             var domain = $("#blockcheckDomainInput").val().trim();
             if (!domain) {
                 BootstrapDialog.show({
                     type: BootstrapDialog.TYPE_WARNING,
                     title: '{{ lang._("Warning") }}',
-                    message: '{{ lang._("Please enter a domain name.") }}'
+                    message: '{{ lang._("Please enter a blocked domain name.") }}'
                 });
                 return;
             }
             $("#blockcheckBtn_progress").addClass("fa fa-spinner fa-pulse");
-            $("#blockcheckResult").text("Running blockcheck2... This may take a few minutes.");
+            $("#blockcheckSummary").html('<em>Running blockcheck against ' + $('<div>').text(domain).html() +
+                '… this takes 1–3 minutes. Don\'t close this page.</em>');
+            $("#blockcheckWinning").html('');
+            $("#blockcheckRaw").text('');
+
             ajaxCall('/api/zapret/diagnostics/blockcheck', {'domain': domain}, function(data, status) {
                 $("#blockcheckBtn_progress").removeClass("fa fa-spinner fa-pulse");
-                if (data.status === 'ok') {
-                    $("#blockcheckResult").text(data.result);
-                } else {
-                    $("#blockcheckResult").text("Error: " + (data.message || "Unknown error"));
+
+                if (data.status !== 'ok') {
+                    $("#blockcheckSummary").html('<span class="text-danger">' +
+                        $('<div>').text("Error: " + (data.message || 'Unknown error')).html() + '</span>');
+                    return;
                 }
+
+                // data.result is JSON-as-string from blockcheck.sh. Parse it.
+                var bc = tryJSON(data.result);
+                if (!bc) {
+                    // Old wrapper or unexpected output — just dump it
+                    $("#blockcheckSummary").html('<em>Unstructured output:</em>');
+                    $("#blockcheckRaw").text(data.result || '(empty)');
+                    return;
+                }
+
+                if (bc.status === 'error') {
+                    $("#blockcheckSummary").html('<span class="text-danger">' +
+                        $('<div>').text("Blockcheck error: " + bc.message).html() + '</span>');
+                    if (bc.log) $("#blockcheckRaw").text(bc.log);
+                    return;
+                }
+
+                $("#blockcheckSummary").html('Tested <strong>' + $('<div>').text(bc.domain).html() +
+                    '</strong>. Strategies that worked are listed below — copy one into the HTTPS Strategy field on the Settings page.');
+
+                // List winning strategies
+                var html = '';
+                if (bc.winning && bc.winning.length > 0) {
+                    html = '<ul style="font-family: monospace; font-size: 12px;">';
+                    bc.winning.forEach(function(line) {
+                        if (line.trim() !== '') {
+                            html += '<li>' + $('<div>').text(line).html() + '</li>';
+                        }
+                    });
+                    html += '</ul>';
+                } else {
+                    html = '<em>No working strategies found in the standard test set. Try a different domain or run blockcheck2 manually via SSH for a custom search.</em>';
+                }
+                $("#blockcheckWinning").html(html);
+
+                // Full summary in raw box
+                $("#blockcheckRaw").text(bc.summary || '');
             });
         });
     });
@@ -118,9 +165,9 @@
                             <table class="table table-striped">
                                 <tbody>
                                     <tr>
-                                        <td style="width: 200px;">{{ lang._('Domain') }}</td>
+                                        <td style="width: 200px;">{{ lang._('Blocked Domain') }}</td>
                                         <td>
-                                            <input type="text" class="form-control" id="blockcheckDomainInput" placeholder="example.com"/>
+                                            <input type="text" class="form-control" id="blockcheckDomainInput" placeholder="rutracker.org"/>
                                         </td>
                                         <td style="width: 150px;">
                                             <button class="btn btn-primary" id="blockcheckBtn" type="button">
@@ -131,8 +178,15 @@
                                 </tbody>
                             </table>
                         </div>
-                        <div class="col-md-12">
-                            <pre id="blockcheckResult" style="max-height: 500px; overflow-y: auto; white-space: pre-wrap;">{{ lang._('Enter a blocked domain and click Run to test which DPI bypass strategies work against your ISP. This may take several minutes.') }}</pre>
+                        <div class="col-md-12" style="padding-top: 10px;">
+                            <div id="blockcheckSummary">
+                                {{ lang._('Enter a domain that your ISP currently blocks and click Run. Blockcheck will spend 1–3 minutes testing many DPI bypass strategies and report which ones successfully reach the site. Copy a working strategy into the HTTPS Strategy field on the Settings page.') }}
+                            </div>
+                            <div id="blockcheckWinning" style="padding-top: 10px;"></div>
+                            <details style="padding-top: 10px;">
+                                <summary>{{ lang._('Full output (advanced)') }}</summary>
+                                <pre id="blockcheckRaw" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 11px;"></pre>
+                            </details>
                         </div>
                     </div>
                 </div>
