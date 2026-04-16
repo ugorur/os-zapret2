@@ -1,61 +1,55 @@
 # os-zapret2
 
-OPNsense plugin for [zapret2](https://github.com/bol-van/zapret2) — a DPI (Deep Packet Inspection) bypass tool for anti-censorship.
+OPNsense plugin for [zapret2](https://github.com/bol-van/zapret2) — DPI bypass for anti-censorship.
 
-Provides a full GUI integration for managing zapret2's `dvtws2` on OPNsense firewalls running FreeBSD 14+.
+GUI-managed, fail-open, supervised, works on both bare-metal OPNsense and virtualized OPNsense (Proxmox/ESXi/Hyper-V).
 
-## What It Does
+## What it does
 
-Many ISPs use DPI to inspect TLS ClientHello packets and block websites based on the SNI (Server Name Indication) field. zapret2 defeats this by manipulating outgoing packets — splitting, faking, or reordering them so the DPI device can't read the SNI, while the destination server reassembles them correctly.
+Many ISPs use Deep Packet Inspection (DPI) to read the SNI field in TLS ClientHello packets and block specific websites. zapret2 defeats this by manipulating outgoing TLS handshakes so the DPI device can't read the SNI, while the destination server still reassembles the connection correctly.
 
-## Features
-
-- **GUI Settings** — Enable/disable, WAN interface selection, DPI desync mode, TTL, ports, custom arguments
-- **Multiple Desync Strategies** — fake, multisplit, fakedsplit, fakeddisorder, syndata, hopbyhop, destopt, ipfrag1
-- **Fooling Methods** — badsum, badseq, md5sig, datanoack
-- **Domain Hostlist** — Apply bypass to all traffic or only specific domains
-- **Diagnostics Page** — Test domain connectivity and run blockcheck2 to find the best strategy for your ISP
-- **Service Management** — Start/stop/restart from the GUI with status indicator
-- **Safe ipfw Integration** — Coexists with OPNsense's pf firewall; ipfw loaded as module with default-allow policy
+This plugin packages [bol-van/zapret2](https://github.com/bol-van/zapret2) into an OPNsense service with:
+- A real `pkg add`-installable package that registers under **Firmware → Plugins**.
+- Settings page under **Services → Zapret DPI Bypass**.
+- Diagnostics page that runs upstream's `blockcheck2` for you and shows winning strategies for your ISP.
+- Auto-start on every reboot once Enable is checked.
+- `daemon -r` supervision so a dvtws2 crash auto-restarts within ~1 second.
+- A safety watchdog that auto-stops the service if a misconfigured strategy starts breaking general HTTPS — your household internet recovers in ~3 minutes without anyone touching anything.
+- **`pf divert-to` packet interception** (not `ipfw divert`) — works on virtualized OPNsense (Proxmox/virtio) where the ipfw approach infinite-loops, AND fail-opens if dvtws2 dies (traffic just passes through without bypass instead of being dropped).
 
 ## Requirements
 
-- OPNsense 26.1 or later (FreeBSD 14.x)
-- WAN interface (PPPoE, DHCP, static — any type)
-- `luajit` package (auto-installed as dependency)
+- OPNsense 26.1 or later (FreeBSD 14.x).
+- Any WAN type — PPPoE, DHCP, static, all work.
+- The plugin's `setup.sh` will install `luajit`, `jq`, `git-lite`, `pkgconf` from FreeBSD's main repo and compile `dvtws2`. Internet access required for the one-time setup.
 
 ## Installation
 
-Releases ship as a proper FreeBSD `.pkg`. Install it with `pkg add` — OPNsense
-will then register it natively: you'll see it under **Firmware → Plugins**
-(as `os-zapret2`) and **System → Services** (as `zapret2 DPI Bypass`), and it
-will auto-start on every reboot while **Enabled** is checked.
-
-### Install from Release
+Releases ship as a real FreeBSD `.pkg`. Install with `pkg add` — OPNsense registers it like any other plugin.
 
 ```sh
-# On the OPNsense firewall (via SSH, as root)
+# On the OPNsense firewall (SSH as root)
 
 fetch -o /tmp/os-zapret2.pkg \
-    https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.5.pkg
+    https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-1.6.pkg
 
 pkg add /tmp/os-zapret2.pkg
 
-# Bootstrap dependencies (luajit, jq, git-lite, pkgconf from FreeBSD's
-# main pkg repo) and compile dvtws2. One-time, ~1 minute.
+# Bootstrap dependencies and compile dvtws2 (~1 minute, one-time)
 /usr/local/opnsense/scripts/OPNsense/Zapret/setup.sh
 ```
 
-**Note:** the `.pkg` does not declare `luajit` / `jq` as dependencies because they're not in OPNsense's package repository (they're in FreeBSD's main repo, which is enabled but not always primed on a fresh install). `setup.sh` handles them — running it after `pkg add` is required before the service can start.
+> **Why `setup.sh` instead of dependencies?** OPNsense's pkg repository doesn't carry `luajit` / `jq` (those live in FreeBSD's main repo, which OPNsense ships disabled by default). `setup.sh` enables that repo for the duration of the install, fetches the deps, then restores the original repo state. The `.pkg` itself stays clean and rapid to install.
 
-Then open **Services → Zapret DPI Bypass** in the GUI and configure it.
+After setup, navigate to **Services → Zapret DPI Bypass → Settings** in the GUI.
 
-Verify the plugin is registered:
+Verify the install:
 
 ```sh
 pkg info os-zapret2
-# shows name, version, origin, install date
 ```
+
+The plugin will also appear in **Firmware → Plugins** (as `os-zapret2`) and **System → Services** (as `Zapret2 DPI Bypass`) with start/stop controls.
 
 ### Uninstall
 
@@ -63,17 +57,12 @@ pkg info os-zapret2
 pkg delete os-zapret2
 ```
 
-The `+PRE_DEINSTALL` hook stops dvtws2 and clears ipfw divert rules before
-files are removed. Saved settings in `config.xml` are preserved — reinstalling
-will pick them up again.
+`+PRE_DEINSTALL` cleanly stops the service and removes pf rules before files are deleted. Saved settings in `config.xml` are preserved — reinstalling later picks them up.
 
-### Build from Source
-
-You need a FreeBSD host (or a FreeBSD VM — GitHub Actions uses
-`vmactions/freebsd-vm`) because `pkg-static create` is FreeBSD-only.
+### Build from source
 
 ```sh
-# On a FreeBSD 14 host, with jq installed
+# On a FreeBSD 14 host (or in a FreeBSD VM — CI uses vmactions/freebsd-vm)
 git clone https://github.com/ugorur/os-zapret2.git
 cd os-zapret2
 pkg install -y jq
@@ -81,54 +70,50 @@ sh scripts/build-pkg.sh
 # Output: dist/os-zapret2-<version>.pkg
 ```
 
-Then copy the `.pkg` to the firewall and `pkg add` it as above.
+## Quick start
 
-## Quick Start
+1. **Services → Zapret DPI Bypass → Diagnostics → Blockcheck.** Enter a domain that's blocked on your ISP (e.g., `rutracker.org`, `rutracker.org`, whatever you can't reach). Click **Run**. Wait 1–3 minutes — the plugin runs upstream's `blockcheck2` against ~50 strategies and reports the winning ones.
+2. Copy the strategy with a working result.
+3. **Services → Zapret DPI Bypass → Settings.** Tick **Enable**, pick your **WAN Interface** from the dropdown, paste the winning strategy into **HTTPS Strategy**, click **Save & Apply**.
+4. Test the same blocked domain from a LAN device — should now load.
 
-1. Run `blockcheck2.sh` via SSH to find working strategies for your ISP (see [Finding the Right Strategy](#finding-the-right-strategy))
-2. Go to **Services > Zapret DPI Bypass > Settings**
-3. Check **Enable** and select your **WAN Interface**
-4. Paste the HTTP strategy from blockcheck2 results into the **HTTP Strategy** field
-5. Paste the HTTPS strategy into the **HTTPS Strategy** field
-6. Click **Save** then **Start**
-7. Test: Go to **Diagnostics** tab, enter a blocked domain, click **Test**
-
-## Finding the Right Strategy
-
-Every ISP's DPI is different. Use the **Diagnostics > Blockcheck** feature to test which strategy works for your connection:
-
-1. Go to **Services > Zapret DPI Bypass > Diagnostics**
-2. Enter a domain that is known to be blocked on your network
-3. Click **Run** — blockcheck2 will test multiple strategies and report which ones work
-4. Apply the recommended settings on the **Settings** page
-
-## How It Works
+## How it works
 
 ```
-Client → [pf firewall] → [ipfw divert] → dvtws2 → [pf firewall] → ISP → Internet
-                              ↓
-                    Modifies TLS ClientHello
-                    (splits/fakes SNI field)
+LAN client ──► OPNsense (pf divert-to) ──► dvtws2 (manipulates TLS ClientHello) ──► WAN ──► ISP DPI ──► destination
 ```
 
-1. ipfw rules divert outbound HTTPS traffic to a divert socket
-2. `dvtws2` intercepts packets and applies the configured DPI desync strategy
-3. Modified packets pass through pf and reach the ISP
-4. The ISP's DPI can no longer read the SNI, so the connection is not blocked
-5. The destination server reassembles packets normally
+1. A pf rule in the plugin's private anchor (`userrules/zapret`) matches outbound traffic to the configured ports (default 80, 443) on the WAN interface and diverts it to a local divert socket on `127.0.0.1:989`.
+2. `dvtws2` reads the diverted packets, applies the LUA-driven desync strategy you configured, and reinjects.
+3. pf's stateful divert-to handling re-injects past the divert rule (no infinite loop).
+4. Reinjected packets go out the WAN. The ISP's DPI sees a TLS ClientHello it can't parse, so it doesn't match the blocklist.
+5. The destination server's TLS stack is more lenient than the DPI's, so it reassembles the modified packets and the connection completes normally.
+
+The plugin's anchor survives `pfctl -f` reloads (i.e. OPNsense saves), so the divert rule stays installed across config changes.
 
 ## Safety
 
-- **ipfw coexists with pf** — ipfw is loaded as a kernel module with default-allow policy, so it doesn't interfere with OPNsense's firewall rules
-- **Only port 443 (HTTPS) on WAN is affected** — LAN traffic, DNS, VPN, and other services are untouched
-- **Easy rollback** — Stop the service from GUI, or `kldunload ipfw` from SSH, or simply reboot
-- **No DNS changes needed** — works at the packet level, independent of your DNS configuration
+- **Fail-open under listener death.** If dvtws2 crashes, pf's divert-to skips the divert (instead of dropping packets like ipfw would). Internet keeps working without bypass.
+- **`daemon -r` supervision.** Even if dvtws2 dies, it auto-restarts within ~1 second.
+- **Watchdog auto-stop.** Every minute, a watchdog probes `https://example.com` through the bypass. If 3 consecutive checks fail (= a misconfigured strategy is breaking general HTTPS), the watchdog calls `configctl zapret stop` itself. Internet recovers in ~3 minutes; check `tail /var/log/messages | grep zapret-watchdog` for the reason. Override the probe URL via `/usr/local/etc/zapret2/watchdog.conf` (`CONTROL_URL=https://...`).
+- **No DNS changes required.** The plugin operates at the packet level; your DNS configuration is independent. (For ISP DNS poisoning, pair this with AdGuard/Unbound DoH, which OPNsense supports natively.)
+- **WAN-only.** The pf rule is scoped to outbound on the WAN device; LAN-to-LAN traffic and other interfaces are untouched.
+
+## Troubleshooting
+
+**General HTTPS broke after I clicked Save.** The strategy you picked is too aggressive. Wait ~3 minutes for the watchdog to auto-stop the service, OR click **Stop** in the GUI manually. Re-run **Diagnostics → Blockcheck** to find a milder strategy.
+
+**Bypass works for me on the firewall but not from LAN devices.** That used to be a thing with the old ipfw architecture; the current pf divert-to handles forwarded LAN traffic identically. If you still see this, check that **Host List Mode** is `All traffic on configured ports` (not `Only specific domains` with an empty domain list).
+
+**Service won't start — "dvtws2 child failed to start".** Run `setup.sh` again — the binary may not have compiled. Check `ls /usr/local/etc/zapret2/binaries/my/dvtws2`. If missing, `cd /usr/local/etc/zapret2 && make`.
+
+**Bypass auto-stops repeatedly.** The watchdog is doing its job — your strategy is dropping general HTTPS. Either find a different strategy via Blockcheck or switch **Host List Mode** to `Only specific domains` and list just the censored sites.
 
 ## License
 
-MIT License — same as [zapret2](https://github.com/bol-van/zapret2)
+MIT — same as [bol-van/zapret2](https://github.com/bol-van/zapret2).
 
 ## Credits
 
-- [bol-van/zapret2](https://github.com/bol-van/zapret2) — the underlying DPI bypass tool
-- [OPNsense](https://opnsense.org/) — the firewall platform
+- [bol-van/zapret2](https://github.com/bol-van/zapret2) — the underlying DPI bypass tool and lua strategy engine.
+- [OPNsense](https://opnsense.org/) — the firewall platform.

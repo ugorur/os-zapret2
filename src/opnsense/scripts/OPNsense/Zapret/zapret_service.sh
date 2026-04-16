@@ -180,7 +180,9 @@ stop_service() {
     # tear-down window.
     remove_pf_anchor
 
-    # Kill the watchdog FIRST (before its supervisor can respawn it)
+    # Kill the watchdog FIRST (before its supervisor can respawn it).
+    # Also clean any orphans from previous installs that lost their
+    # supervisor's pidfile during pkg upgrade.
     if [ -f "${WATCHDOG_SUPERVISOR_PIDFILE}" ]; then
         kill "$(cat ${WATCHDOG_SUPERVISOR_PIDFILE})" 2>/dev/null
         rm -f "${WATCHDOG_SUPERVISOR_PIDFILE}"
@@ -189,6 +191,8 @@ stop_service() {
         kill "$(cat ${WATCHDOG_PIDFILE})" 2>/dev/null
         rm -f "${WATCHDOG_PIDFILE}"
     fi
+    pkill -f watchdog_loop.sh 2>/dev/null
+    pkill -f "daemon: zapret-watchdog" 2>/dev/null
     rm -f /var/run/zapret-watchdog.state
 
     # Kill the dvtws2 supervisor so daemon -r doesn't respawn dvtws2
