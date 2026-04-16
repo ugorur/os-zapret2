@@ -18,11 +18,14 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "=== DNS Resolution ==="
-dig +short "${DOMAIN}" 2>&1
+# +tries + +time bounded so a poisoned/blackholed DNS doesn't hang us.
+DNS_RESULT=$(dig +short +time=2 +tries=2 "${DOMAIN}" 2>&1)
+[ -z "${DNS_RESULT}" ] && DNS_RESULT="(no answer — DNS may be blocked)"
+echo "${DNS_RESULT}"
 
 echo ""
 echo "=== HTTPS Connection Test ==="
-curl -4 -sk --connect-timeout 10 --max-time 15 -o /dev/null \
+curl -4 -sk --connect-timeout 5 --max-time 10 -o /dev/null \
     -w "HTTP Status: %{http_code}\nRemote IP: %{remote_ip}\nTLS Version: %{ssl_version}\nTime Connect: %{time_connect}s\nTime TLS: %{time_appconnect}s\nTime Total: %{time_total}s\n" \
     "https://${DOMAIN}/" 2>&1
 
