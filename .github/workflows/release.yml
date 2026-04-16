@@ -39,12 +39,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract version from tag
+      - name: Extract versions
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/v}"
+          # The pkg filename uses the Makefile's PLUGIN_VERSION (which may
+          # differ from the tag, e.g. tag v1.6.0 vs Makefile 1.6 → pkg name
+          # `os-zapret2-1.6.pkg`). Extract both so the release-notes URL
+          # matches the actual asset name.
+          PKG=$(grep '^PLUGIN_VERSION=' Makefile | head -1 | sed 's/.*=\s*//')
+          REV=$(grep '^PLUGIN_REVISION=' Makefile | head -1 | sed 's/.*=\s*//')
+          if [ -n "$REV" ] && [ "$REV" != "0" ]; then
+            PKG="${PKG}_${REV}"
+          fi
           echo "tag_version=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "Release version: ${TAG}"
+          echo "pkg_version=${PKG}" >> "$GITHUB_OUTPUT"
+          echo "Release tag: v${TAG} | pkg: os-zapret2-${PKG}.pkg"
 
       - name: Build .pkg inside FreeBSD VM
         uses: vmactions/freebsd-vm@v1
@@ -78,7 +88,7 @@ jobs:
           Install from SSH on the OPNsense firewall:
 
           ```sh
-          fetch -o /tmp/os-zapret2.pkg https://github.com/ugorur/os-zapret2/releases/latest/download/os-zapret2-${{ steps.version.outputs.tag_version }}.pkg
+          fetch -o /tmp/os-zapret2.pkg https://github.com/ugorur/os-zapret2/releases/download/v${{ steps.version.outputs.tag_version }}/os-zapret2-${{ steps.version.outputs.pkg_version }}.pkg
           pkg add /tmp/os-zapret2.pkg
 
           # Download and compile the dvtws2 binary
