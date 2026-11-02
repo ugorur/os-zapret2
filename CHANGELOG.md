@@ -4,6 +4,16 @@ All notable changes to os-zapret2 are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- **"Auto-detect blocked domains" never detected anything** (#12). The service
+  diverted only outgoing packets, so dvtws2 never saw the RSTs an ISP injects
+  for blocked sites, nor the SYN-ACKs autottl relies on. It now also diverts
+  SYN-ACK, FIN and RST replies for the TCP ports on their way to the LAN.
+  Upstream's inbound rule is not usable on OPNsense: pf strips ipfw's divert
+  tag from reinjected packets, which loops or drops them. The extra rule
+  lowers the limit from 11 to 10 TCP ports (9 with QUIC).
+
 ## v1.8.3 - 2026-08-10
 
 Most of this release was contributed by [apfilipp](https://github.com/apfilipp).

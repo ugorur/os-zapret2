@@ -36,16 +36,36 @@ remove_ipfw_rules()
 SOURCE_NETS=""
 DIVERT_PORT=989
 
-PORTS="1,2,3,4,5,6,7,8,9,10,11"
+PORTS="1,2,3,4,5,6,7,8,9,10"
 QUIC_ARGS=""
 validate_ipfw_rule_capacity
 
-PORTS="1,2,3,4,5,6,7,8,9,10"
+PORTS="1,2,3,4,5,6,7,8,9"
 QUIC_ARGS="--payload=quic_initial"
 install_ipfw_rules igc0
 
-test "$(grep -c ' add ' "${ipfw_log}")" -eq 11
-grep -qF 'add 19010 divert 989 udp' "${ipfw_log}"
+test "$(grep -c ' add ' "${ipfw_log}")" -eq 13
+grep -qF 'add 19009 divert 989 udp' "${ipfw_log}"
+for flags in syn,ack fin rst; do
+    grep -qF "add 19010 divert 989 tcp from any 1,2,3,4,5,6,7,8,9 to any tcpflags ${flags} out recv igc0 not diverted" "${ipfw_log}"
+done
+
+: > "${ipfw_log}"
+SOURCE_NETS="10.0.30.0/24,10.0.40.0/24"
+PORTS="80,443"
+QUIC_ARGS=""
+install_ipfw_rules igc0
+grep -qF 'add 19002 divert 989 tcp from any 80,443 to 10.0.30.0/24,10.0.40.0/24 tcpflags rst out recv igc0 not diverted' "${ipfw_log}"
+SOURCE_NETS=""
+
+: > "${ipfw_log}"
+PORTS="1,2,3,4,5,6,7,8,9,10"
+QUIC_ARGS="--payload=quic_initial"
+if install_ipfw_rules igc0 2>/dev/null; then
+    echo 'TCP plus QUIC layout without room for reply rules was accepted' >&2
+    exit 1
+fi
+test ! -s "${ipfw_log}"
 
 : > "${ipfw_log}"
 PORTS="1,2,3,4,5,6,7,8,9,10,11"
@@ -57,7 +77,7 @@ fi
 
 test ! -s "${ipfw_log}"
 
-PORTS="1,2,3,4,5,6,7,8,9,10,11,12"
+PORTS="1,2,3,4,5,6,7,8,9,10,11"
 QUIC_ARGS=""
 if validate_ipfw_rule_capacity 2>/dev/null; then
     echo 'oversized TCP rule layout was accepted' >&2

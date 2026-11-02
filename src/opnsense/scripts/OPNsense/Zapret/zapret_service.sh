@@ -40,7 +40,8 @@ LUA_ANTIDPI="${ZAPRET_DIR}/lua/zapret-antidpi.lua"
 # ipfw rule numbers we own. Range 19000-19010 — high enough to avoid
 # OPNsense's own rules, low enough to fire before the default-accept at
 # 65534. TCP ports start at 19000; when QUIC is enabled, the next rule
-# diverts UDP/443 (19002 with the default TCP ports 80,443).
+# diverts UDP/443 (19002 with the default TCP ports 80,443). The next
+# number holds the reply rules (SYN-ACK/FIN/RST), see install_ipfw_rules.
 RULE_BASE=19000
 RULE_MAX=$((RULE_BASE + 10))
 
@@ -155,6 +156,9 @@ validate_ipfw_rule_capacity() {
         rule_count=$((rule_count + 1))
     fi
 
+    # Reply rules (SYN-ACK/FIN/RST) share one number.
+    rule_count=$((rule_count + 1))
+
     if [ "${rule_count}" -gt "${rule_capacity}" ]; then
         echo "configured TCP and QUIC profiles require ${rule_count} ipfw rules; reserved range ${RULE_BASE}-${RULE_MAX} has room for ${rule_capacity}" >&2
         return 1
@@ -252,6 +256,36 @@ install_ipfw_rules() {
     fi
 
     IFS="${IFS_SAVED}"
+
+    # Replies: SYN-ACK, FIN and RST from the TCP ports. dvtws2 needs them
+    # for conntrack and autottl, and the auto hostlist only notices an
+    # ISP-injected RST if it sees it (issue #12). Upstream's FreeBSD
+    # baseline diverts these `in recv $WAN`, but that does not work here:
+    #
+    # - pf runs before ipfw on the inbound pfil head. When dvtws2 reinjects
+    #   a packet, pf sees the pf divert tag and deletes ipfw's
+    #   MTAG_IPFW_RULE with it (sys/netpfil/pf/pf.c, pf_test), so
+    #   `not diverted` never matches and the packet loops (seen live:
+    #   ~100k passes of one SYN-ACK in 5 s).
+    # - For LAN clients pf has already undone the NAT on the first pass,
+    #   so on the second pass it finds no state and drops the reply.
+    # - Moving ipfw ahead of pf on input stops the loop, but then dvtws2
+    #   sees the WAN address and NAT port and cannot match the reply to
+    #   the client's connection.
+    #
+    # So divert the reply on its way OUT to the LAN instead: `recv` still
+    # names the WAN it arrived on, the addresses are already de-NATed, and
+    # ipfw runs before pf on output, so its divert tag survives. dvtws2
+    # matches the packet to its conntrack entry and treats it as incoming.
+    # Costs: replies to the firewall's own traffic are not seen, and the
+    # TTL dvtws2 learns is one lower (already decremented by forwarding).
+    # Data packets stay in the kernel. All three rules share one number.
+    local flags
+    for flags in syn,ack fin rst; do
+        /sbin/ipfw -qf add ${rulenum} divert ${DIVERT_PORT} tcp \
+            from any ${PORTS} to "${src_spec}" tcpflags ${flags} \
+            out recv ${wan_dev} not diverted
+    done
 }
 
 start_service() {
