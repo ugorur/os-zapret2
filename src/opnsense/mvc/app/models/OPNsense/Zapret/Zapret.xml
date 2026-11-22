@@ -32,6 +32,13 @@
                 <FieldSeparator>,</FieldSeparator>
                 <ValidationMessage>Please enter valid IPv4 addresses or networks in CIDR notation (e.g. 192.168.1.0/24).</ValidationMessage>
             </sourcenets>
+            <watchdogdomains type="HostnameField">
+                <Default>example.com</Default>
+                <Required>N</Required>
+                <IpAllowed>N</IpAllowed>
+                <AsList>Y</AsList>
+                <ValidationMessage>Please enter valid domain names (e.g. example.com).</ValidationMessage>
+            </watchdogdomains>
         </general>
         <strategy>
             <httpargs type="TextField">

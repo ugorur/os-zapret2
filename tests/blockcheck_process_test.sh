@@ -20,8 +20,9 @@ trap cleanup_test EXIT INT TERM HUP
 helpers=$(sed -n '/^process_matches()/,/^# cleanup()/p' "${wrapper}")
 eval "${helpers}"
 
-ln -s /bin/sleep "${test_root}/dvtws2"
-"${test_root}/dvtws2" 30 &
+printf '#!/bin/sh\nwhile :; do sleep 1; done\n' > "${test_root}/dvtws2"
+chmod +x "${test_root}/dvtws2"
+"${test_root}/dvtws2" &
 test_pid=$!
 printf '%s\n' "${test_pid}" > "${test_root}/child.pid"
 

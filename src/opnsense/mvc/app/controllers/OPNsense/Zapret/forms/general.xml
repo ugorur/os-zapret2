@@ -35,6 +35,17 @@
             exercising the bypass path.]]></help>
     </field>
     <field>
+        <id>zapret.general.watchdogdomains</id>
+        <label>Watchdog Check Domains</label>
+        <type>select_multiple</type>
+        <style>tokenize</style>
+        <allownew>true</allownew>
+        <help><![CDATA[Every minute the safety watchdog requests <code>https://&lt;domain&gt;</code> through the bypass.
+            One answering domain is enough; if none answers three times in a row, the service stops so the
+            internet keeps working. Any HTTP answer counts, even a rate-limit error.
+            Use stable sites that are never blocked in your country. Empty means <code>example.com</code>.]]></help>
+    </field>
+    <field>
         <id>zapret.general.divertport</id>
         <label>Divert Port</label>
         <type>text</type>
