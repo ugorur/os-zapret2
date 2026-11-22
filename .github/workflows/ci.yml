@@ -46,6 +46,7 @@ jobs:
           sh tests/blockcheck_process_test.sh
           sh tests/strategy_test_wan_test.sh
           sh tests/zapret_rule_capacity_test.sh
+          sh tests/watchdog_test.sh
 
       - name: Check file structure
         run: |

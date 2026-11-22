@@ -4,7 +4,20 @@ All notable changes to os-zapret2 are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- **Watchdog Check Domains** setting (#14). The safety watchdog's control
+  check now uses a list of domains from the GUI instead of a hard-coded
+  `example.com` (still the default). One answering domain is enough.
+
 ### Fixed
+
+- **Safety watchdog could hang on a stalled or rate-limited check target**
+  (#14). It used `fetch -T`, which does not limit the TLS handshake, so a
+  server that accepted the connection but stalled the handshake left the
+  check stuck and the watchdog silently off. The check now uses curl with an
+  8-second limit for the whole request, and any HTTP answer (a 429
+  rate-limit error included) counts as reachable instead of as a failure.
 
 - **"Auto-detect blocked domains" never detected anything** (#12). The service
   diverted only outgoing packets, so dvtws2 never saw the RSTs an ISP injects
