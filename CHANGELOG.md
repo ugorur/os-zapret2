@@ -2,7 +2,7 @@
 
 All notable changes to os-zapret2 are documented in this file.
 
-## Unreleased
+## v1.8.4 - 2026-11-23
 
 ### Added
 
